@@ -1,0 +1,51 @@
+// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod config;
+mod modules;
+mod state;
+mod tray;
+mod window;
+
+use std::sync::{Arc, Mutex};
+
+use state::{IslandStateMachine, SharedIsland};
+use tauri::Manager;
+
+fn main() {
+    tauri::Builder::default()
+        .manage::<SharedIsland>(Arc::new(Mutex::new(IslandStateMachine::default())))
+        .manage(modules::audio::AudioController::default())
+        .setup(|app| {
+            let path = config::file_in(&app.path().app_config_dir()?);
+            let settings = config::load(&path);
+            config::sync_launch_at_login(settings.launch_at_login);
+            app.manage::<config::SharedConfig>(Arc::new(Mutex::new(settings)));
+            app.manage(config::ConfigFile(path));
+
+            window::init(app.handle())?;
+            modules::start_all(app.handle());
+            tray::init(app.handle())?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            modules::media::media_play_pause,
+            modules::media::media_next,
+            modules::media::media_previous,
+            modules::media::media_snapshot,
+            modules::lyrics::lyrics_snapshot,
+            modules::audio::audio_set_active,
+            state::island_set_wide,
+            modules::controls::controls_list,
+            modules::controls::controls_set,
+            modules::controls::controls_press,
+            modules::controls::network::wifi_networks,
+            modules::controls::network::wifi_connect,
+            modules::controls::network::bluetooth_devices,
+            modules::controls::network::open_settings,
+            config::config_get,
+            config::config_set,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Notchy");
+}

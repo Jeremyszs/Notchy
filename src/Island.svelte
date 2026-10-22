@@ -1,0 +1,928 @@
+<script lang="ts">
+  import { islandState, setWide, type IslandState } from "./stores/island";
+  import { mediaState, next, playPause, previous } from "./stores/media";
+  import { currentLine, lyricsState } from "./stores/lyrics";
+  import {
+    enabledPages,
+    enterPanel,
+    go,
+    leavePanel,
+    page,
+    PAGE_LABELS,
+    step,
+    type Page,
+  } from "./stores/pages";
+  import { tint } from "./stores/tint";
+  import { levels } from "./stores/audio";
+  import { refresh as refreshControls } from "./stores/controls";
+  import ControlsPage from "./ControlsPage.svelte";
+  import { fade, fly } from "svelte/transition";
+  import { islandPath } from "./lib/shape";
+  import { createWheelGesture } from "./lib/wheel";
+
+  type Shown = Exclude<IslandState, "hidden">;
+
+  // Body sizes in logical px. Must match IslandState::pill_size in src-tauri/src/state.rs,
+  // which drives the click-through hit area. The ears sit outside the body and are not hit-tested.
+  // The tucked ear is 2.5 because its bottom radius is 2.5, and the ear must end above that curve.
+  // The expanded and lyrics heights include the pager row, and must stay under the 240 px window.
+  // The lyrics body is wider than the panel and is taller for its enlarged lines.
+  const SIZES: Record<Shown, { w: number; h: number; ear: number }> = {
+    idle: { w: 120, h: 30, ear: 10 },
+    active: { w: 200, h: 30, ear: 10 },
+    expanded: { w: 380, h: 184, ear: 10 },
+    lyrics: { w: 620, h: 214, ear: 10 },
+    tucked: { w: 64, h: 5, ear: 2.5 },
+  };
+
+  // Pages slide this far sideways as they change. Reduced motion keeps only the fade.
+  const PAGE_SHIFT = 16;
+
+  // The panel shows one synced lyric line, or the source app when there are no lyrics.
+  // A line change rises 4px while it fades in. Reduced motion keeps the fade and drops the rise.
+  const reduceMotion =
+    typeof matchMedia === "function" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const lineIn = { duration: 180, y: reduceMotion ? 0 : 4 };
+  // The lyrics stack moves as one block: it rises 10px while it fades in, and the old block fades.
+  const stackIn = { duration: 220, y: reduceMotion ? 0 : 10 };
+  $: lyricLine =
+    $lyricsState.status === "synced" ? ($currentLine?.current ?? "") : "";
+  $: sourceLine =
+    $lyricsState.status === "none" || $lyricsState.status === "plain"
+      ? $mediaState.source
+      : "";
+
+  // The lyrics layout shows the three lines around the playback position. Before the first line
+  // there is nothing around it, so the lines are blank and the layout holds its place.
+  const NO_WINDOW = { prev: "", current: "", next: "" };
+  $: lyricWindow = $currentLine ?? NO_WINDOW;
+  $: stackKey = `${lyricWindow.prev}\u0000${lyricWindow.current}\u0000${lyricWindow.next}`;
+
+  // The compact pill shows the title, or the artist when the title is empty.
+  $: activeLabel = $mediaState.title || $mediaState.artist;
+
+  // The wide layout needs the media page with synced lines and a playing track. Hover is
+  // decided in Rust, so this only says the layout is available, not that it is showing.
+  $: setWide(
+    $page === "media" &&
+      $mediaState.active &&
+      $lyricsState.status === "synced" &&
+      $currentLine !== null,
+  );
+
+  // Hidden keeps the last visible size, so the next state springs up from where the island was.
+  let shown: Shown = "idle";
+  $: if ($islandState !== "hidden") shown = $islandState;
+
+  // Each shape is mounted at its native size, so its corners are never scaled at rest.
+  // The shown shape sits at scale 1. The others are parked at the shown size and hidden.
+  // A state change then animates only transform and opacity, and the incoming shape
+  // springs up from the previous state's size.
+  //
+  // Docking: every shape scales about the top centre of the window, so its top edge stays
+  // on y=0. The shape is split into two nested elements so each axis gets its own easing.
+  // Width (outer, scaleX) keeps a gentle spring. Height (inner .frame, scaleY) must not
+  // overshoot. A parked tucked sliver starts at about 28x its height, and any overshoot
+  // past 1 on that axis would drive the scale negative and flip the shape.
+  // BLEED extends each outline this many px above the window top. See islandPath.
+  const BLEED = 16;
+
+  function shapeStyle(shape: Shown, from: Shown): string {
+    const { w, h, ear } = SIZES[shape];
+    const sx = SIZES[from].w / w;
+    return `width:${w + 2 * ear}px;height:${h}px;margin-left:${-(w / 2 + ear)}px;--w:${w}px;--ear:${ear}px;transform:scaleX(${sx})`;
+  }
+
+  function frameStyle(shape: Shown, from: Shown): string {
+    const sy = SIZES[from].h / SIZES[shape].h;
+    return `transform:scaleY(${sy})`;
+  }
+
+  // Opening the panel picks its page and reloads the control values. Closing it remembers the page.
+  // The lyrics layout is part of the open panel, so moving between the two does not reset it.
+  let panelOpen = false;
+  $: syncPanel($islandState);
+
+  function syncPanel(state: IslandState) {
+    const open = state === "expanded" || state === "lyrics";
+    if (open && !panelOpen) {
+      enterPanel();
+      void refreshControls();
+    } else if (!open && panelOpen) {
+      leavePanel();
+    }
+    panelOpen = open;
+  }
+
+  // Each page sits PAGE_SHIFT to the side of the shown one, on the side it has to come from.
+  // A page that becomes shown moves from its old offset to 0, and the one it replaces moves away.
+  function pageOffset(id: Page): number {
+    const pages = $enabledPages;
+    return Math.sign(pages.indexOf(id) - pages.indexOf($page)) * PAGE_SHIFT;
+  }
+
+  // The wheel turns pages through the classifier in lib/wheel.ts. Mouse notches turn at once,
+  // and a trackpad fling turns one page however long its inertia runs.
+  const SWIPE_MIN_PX = 40;
+  const wheel = createWheelGesture();
+  let swipeFrom: { x: number; y: number } | null = null;
+
+  function onWheel(event: WheelEvent) {
+    const turn = wheel.feed(event);
+    if (turn !== 0) step(turn);
+  }
+
+  function swipeStart(event: PointerEvent) {
+    // Sliders keep their own drags, so a press on an input never starts a swipe.
+    swipeFrom = (event.target as Element).closest("input")
+      ? null
+      : { x: event.clientX, y: event.clientY };
+  }
+
+  function swipeEnd(event: PointerEvent) {
+    if (!swipeFrom) return;
+    const dx = event.clientX - swipeFrom.x;
+    const dy = event.clientY - swipeFrom.y;
+    swipeFrom = null;
+    if (Math.abs(dx) > SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy)) {
+      step(dx < 0 ? 1 : -1);
+    }
+  }
+
+</script>
+
+{#snippet albumArt(size: "sm" | "lg" | "xl")}
+  <div class="art {size}">
+    {#if $mediaState.art}
+      <img src={$mediaState.art} alt="" />
+    {:else}
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </svg>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet transport(compact: boolean)}
+  <div class="controls" class:compact>
+    <button type="button" aria-label="Previous" onclick={previous}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"
+        ><path d="M6 6h2v12H6zM18 6v12l-8.5-6z" /></svg
+      >
+    </button>
+    <button
+      type="button"
+      class="play"
+      aria-label={$mediaState.playing ? "Pause" : "Play"}
+      onclick={playPause}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        {#if $mediaState.playing}
+          <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+        {:else}
+          <path d="M8 5v14l11-7z" />
+        {/if}
+      </svg>
+    </button>
+    <button type="button" aria-label="Next" onclick={next}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"
+        ><path d="M16 6h2v12h-2zM6 6v12l8.5-6z" /></svg
+      >
+    </button>
+  </div>
+{/snippet}
+
+{#snippet pager()}
+  <div class="pager">
+    {#each $enabledPages as id (id)}
+      <button
+        type="button"
+        class="dot"
+        class:on={$page === id}
+        aria-label="{PAGE_LABELS[id]} page"
+        aria-current={$page === id ? "true" : undefined}
+        onclick={() => go(id)}
+      >
+        <span></span>
+      </button>
+    {/each}
+  </div>
+{/snippet}
+
+{#snippet outline(name: Shown)}
+  {@const { w, h, ear } = SIZES[name]}
+  <svg
+    class="outline"
+    viewBox="0 {-BLEED} {w + 2 * ear} {h + BLEED}"
+    aria-hidden="true"
+  >
+    <path d={islandPath(w, h, ear, Math.min(h / 2, 24), BLEED)} />
+  </svg>
+{/snippet}
+
+<div class="island" class:hidden={$islandState === "hidden"}>
+  <div
+    class="shape idle"
+    class:on={$islandState === "idle"}
+    style={shapeStyle("idle", shown)}
+  >
+    <div class="frame" style={frameStyle("idle", shown)}>
+      {@render outline("idle")}
+    </div>
+  </div>
+
+  <div
+    class="shape active"
+    class:on={$islandState === "active"}
+    style={shapeStyle("active", shown)}
+  >
+    <div class="frame" style={frameStyle("active", shown)}>
+      {@render outline("active")}
+      <div class="content compact">
+        {@render albumArt("sm")}
+        <div class="active-title">
+          {#key activeLabel}
+            <span in:fade={{ duration: 200 }} out:fade={{ duration: 200 }}>
+              {activeLabel}
+            </span>
+          {/key}
+        </div>
+        <div class="bars" class:live={$levels !== null} aria-hidden="true">
+          {#each [0, 1, 2, 3] as bar (bar)}
+            <span style={$levels ? `transform: scaleY(${$levels[bar]})` : undefined}></span>
+          {/each}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="shape expanded"
+    class:on={$islandState === "expanded"}
+    style={shapeStyle("expanded", shown)}
+    role="group"
+    aria-label="Island panel"
+    onwheel={onWheel}
+    onpointerdown={swipeStart}
+    onpointerup={swipeEnd}
+    onpointerleave={() => (swipeFrom = null)}
+  >
+    <div class="frame" style={frameStyle("expanded", shown)}>
+      {@render outline("expanded")}
+      <div class="content panel">
+        <div class="pages">
+          {#each $enabledPages as id (id)}
+            <div
+              class="page"
+              class:on={$page === id}
+              style="--x: {pageOffset(id)}px"
+              inert={$page !== id}
+            >
+              {#if id === "media"}
+                {#if $mediaState.active}
+                  <div class="now">
+                    {@render albumArt("lg")}
+                    <div class="meta">
+                      <div class="title">{$mediaState.title}</div>
+                      <div class="artist">{$mediaState.artist}</div>
+                    </div>
+                  </div>
+                  <div class="lyric">
+                    {#if lyricLine}
+                      {#key lyricLine}
+                        <p class="line" in:fly={lineIn} out:fade={{ duration: 180 }}>
+                          {lyricLine}
+                        </p>
+                      {/key}
+                    {:else if sourceLine}
+                      <p class="source">Playing from {sourceLine}</p>
+                    {/if}
+                  </div>
+                  {@render transport(false)}
+                {:else}
+                  <p class="empty">Nothing playing</p>
+                {/if}
+              {:else}
+                <ControlsPage />
+              {/if}
+            </div>
+          {/each}
+        </div>
+        {#if $enabledPages.length > 1}
+          {@render pager()}
+        {/if}
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="shape lyrics"
+    class:on={$islandState === "lyrics"}
+    style={shapeStyle("lyrics", shown)}
+    role="group"
+    aria-label="Lyrics panel"
+    onwheel={onWheel}
+    onpointerdown={swipeStart}
+    onpointerup={swipeEnd}
+    onpointerleave={() => (swipeFrom = null)}
+  >
+    <div class="frame" style={frameStyle("lyrics", shown)}>
+      {@render outline("lyrics")}
+      {#key $tint.id}
+        {@const { w, h, ear } = SIZES.lyrics}
+        <svg
+          class="outline"
+          viewBox="0 {-BLEED} {w + 2 * ear} {h + BLEED}"
+          aria-hidden="true"
+          style="--tint: {$tint.color}"
+          in:fade={{ duration: 400 }}
+          out:fade={{ duration: 400 }}
+        >
+          <defs>
+            <!-- The tint fades to black by the bottom, so the edge still blends into the screen. -->
+            <linearGradient
+              id="tint-{$tint.id}"
+              gradientUnits="userSpaceOnUse"
+              x1="0"
+              y1="0"
+              x2="0"
+              y2={h}
+            >
+              <stop offset="0" style="stop-color: var(--tint)" />
+              <stop offset="0.4" style="stop-color: color-mix(in srgb, var(--tint) 55%, #000)" />
+              <stop offset="0.85" style="stop-color: #000" />
+            </linearGradient>
+          </defs>
+          <path
+            d={islandPath(w, h, ear, Math.min(h / 2, 24), BLEED)}
+            fill="url(#tint-{$tint.id})"
+          />
+        </svg>
+      {/key}
+      <div class="content wide">
+        <div class="wide-body">
+          <div class="side">
+            <div class="now-wide">
+              {@render albumArt("xl")}
+              <div class="meta">
+                <div class="heading">{$mediaState.title}</div>
+                <div class="artist">{$mediaState.artist}</div>
+              </div>
+            </div>
+            {@render transport(true)}
+          </div>
+          <div class="stack-wrap">
+            {#key stackKey}
+              <div class="stack" in:fly={stackIn} out:fade={{ duration: 180 }}>
+                <p class="ctx">{lyricWindow.prev}</p>
+                <p class="cur"><span>{lyricWindow.current}</span></p>
+                <p class="ctx">{lyricWindow.next}</p>
+              </div>
+            {/key}
+          </div>
+        </div>
+        {#if $enabledPages.length > 1}
+          {@render pager()}
+        {/if}
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="shape tucked"
+    class:on={$islandState === "tucked"}
+    style={shapeStyle("tucked", shown)}
+  >
+    <div class="frame" style={frameStyle("tucked", shown)}>
+      {@render outline("tucked")}
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Vertical motion never overshoots. A slide past its rest point would lift the top edge off y=0. */
+  .island {
+    --bleed: 16px; /* Matches BLEED in the script. */
+    position: absolute;
+    inset: 0;
+    /* Only the shapes that are on take clicks, so the rest of the window passes through. */
+    pointer-events: none;
+    transition:
+      transform 450ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 180ms ease;
+  }
+
+  /* Hidden slides the whole island above the window. No shape is on, so nothing takes clicks. */
+  .island.hidden {
+    opacity: 0;
+    transform: translateY(-110%);
+  }
+
+  /* Width scale keeps a gentle spring (peak about 1.03). Scale is about the top centre. */
+  .shape {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    box-sizing: border-box;
+    transform-origin: top center;
+    opacity: 0;
+    will-change: transform, opacity;
+    transition:
+      transform 450ms cubic-bezier(0.34, 1.3, 0.64, 1),
+      opacity 180ms ease;
+  }
+
+  /* Height scale, which must not overshoot. See the note on frameStyle. */
+  .frame {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    transform-origin: top center;
+    will-change: transform;
+    transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .shape.on {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* The outline starts BLEED px above the window top. The window clips at y=0. */
+  .outline {
+    position: absolute;
+    top: calc(-1 * var(--bleed));
+    left: 0;
+    width: 100%;
+    height: calc(100% + var(--bleed));
+    overflow: visible;
+    fill: #000;
+  }
+
+  /* Content leaves before its shape fades, and enters after the shape has started. */
+  .content {
+    position: absolute;
+    top: 0;
+    left: var(--ear);
+    width: var(--w);
+    height: 100%;
+    box-sizing: border-box;
+    color: #fff;
+    font: 500 13px/1.2 var(--font);
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .shape.on .content {
+    opacity: 1;
+    transition: opacity 200ms ease 120ms;
+  }
+
+  .compact {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .art {
+    flex: none;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 50%;
+    background: #1c1c1e;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .art.sm {
+    width: 20px;
+    height: 20px;
+  }
+
+  .art.lg {
+    width: 72px;
+    height: 72px;
+  }
+
+  .art.xl {
+    width: 88px;
+    height: 88px;
+  }
+
+  .art img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .art svg {
+    width: 60%;
+    height: 60%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* The title fills the room between the art and the bars. It fades at the right edge instead of
+     ending in an ellipsis. The grid cell is the container's width, so a long title never grows
+     the pill, and a track change crossfades two spans in the same cell. */
+  .active-title {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  }
+
+  .active-title span {
+    grid-area: 1 / 1;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .bars {
+    display: flex;
+    flex: none;
+    align-items: flex-end;
+    gap: 2px;
+    height: 14px;
+  }
+
+  .bars span {
+    width: 3px;
+    height: 100%;
+    border-radius: 1.5px;
+    background: #fff;
+    transform-origin: bottom;
+  }
+
+  /* Animates only while the active shape is on. Idle, tucked and hidden run no animation. */
+  .shape.active.on .bars span {
+    animation: bar 900ms ease-in-out infinite alternate;
+  }
+
+  /* Live levels replace the fallback. The inline transform sets each bar, and a short ease
+     smooths the 30 Hz frames. Only the transform moves. */
+  .shape.active.on .bars.live span {
+    animation: none;
+    transition: transform 70ms ease-out;
+  }
+
+  .bars span:nth-child(1) {
+    animation-delay: -300ms;
+  }
+
+  .bars span:nth-child(2) {
+    animation-delay: -600ms;
+  }
+
+  .bars span:nth-child(3) {
+    animation-delay: -150ms;
+  }
+
+  .bars span:nth-child(4) {
+    animation-delay: -450ms;
+  }
+
+  @keyframes bar {
+    from {
+      transform: scaleY(0.2);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px 0;
+  }
+
+  /* Pages overlap in one box. The shown page sits in place. Each other page waits PAGE_SHIFT
+     to a side with opacity 0, so a page change slides one in and the other out. */
+  .pages {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .page {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transform: translateX(var(--x, 0px));
+    opacity: 0;
+    transition:
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 220ms ease;
+  }
+
+  .page.on {
+    transform: none;
+    opacity: 1;
+  }
+
+  .page:not(.on) {
+    pointer-events: none;
+  }
+
+  /* Dots take 16px hit areas. The dot itself is 5px. */
+  .pager {
+    display: flex;
+    flex: none;
+    justify-content: center;
+    gap: 4px;
+    height: 16px;
+    margin-bottom: 4px;
+  }
+
+  .dot {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .dot span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #fff;
+    opacity: 0.35;
+    transition: opacity 220ms ease;
+  }
+
+  .dot.on span {
+    opacity: 1;
+  }
+
+  .dot:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.6);
+  }
+
+  .now {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .meta {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .title,
+  .artist {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .artist {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* A fixed row, so a line that is missing or changing never moves the controls. The line and
+     the source share one cell, which lets an outgoing line fade while the next one rises. */
+  .lyric {
+    display: grid;
+    height: 16px;
+  }
+
+  .lyric > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 16px;
+  }
+
+  .lyric .line {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .lyric .source {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .controls {
+    display: flex;
+    justify-content: center;
+    gap: 22px;
+  }
+
+  .controls button {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .controls button:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .controls svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+  }
+
+  /* The lyrics layout's transport is twice the panel's, centred under the art in the left column.
+     Play is a little larger than the skip buttons. */
+  .controls.compact {
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .controls.compact button {
+    width: 60px;
+    height: 60px;
+  }
+
+  .controls.compact button.play {
+    width: 68px;
+    height: 68px;
+  }
+
+  .controls.compact svg {
+    width: 36px;
+    height: 36px;
+  }
+
+  .controls.compact button.play svg {
+    width: 40px;
+    height: 40px;
+  }
+
+  .empty {
+    margin: auto;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  /* Lyrics layout: art, title and transport on the left, three lines on the right. The pager
+     stays centred at the bottom. The body is 214 px tall, less 12 px of top padding and the
+     20 px pager row, which leaves 182 px for the columns. */
+  .wide {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    padding: 12px 14px 0;
+  }
+
+  .wide-body {
+    display: flex;
+    flex: 1;
+    gap: 20px;
+    min-height: 0;
+  }
+
+  /* The left column is 250 px: art and text (250 less 88 px art and 12 px gap), then the
+     centred transport row of 212 px, which fits with room to spare. */
+  .side {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 14px;
+    width: 250px;
+  }
+
+  .now-wide {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  /* Two lines at most. A long title wraps rather than cutting off after one line. */
+  .heading {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 23px;
+  }
+
+  /* The lyrics layout's artist is one line, larger than in the panel. Only this layout changes. */
+  .wide .artist {
+    font-size: 15px;
+    line-height: 18px;
+  }
+
+  /* The stack is a fixed 132 px block, centred in the body, so a change of line length moves
+     nothing outside the block. Each block is absolute, so an outgoing block fades over the new one. */
+  .stack-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .stack {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .stack p {
+    margin: 0;
+  }
+
+  .stack .ctx {
+    height: 26px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 21px;
+    line-height: 26px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* Two lines of 32 px at most. A single line sits centred in the same 64 px box. */
+  .stack .cur {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 64px;
+    font-size: 27px;
+    font-weight: 600;
+    line-height: 32px;
+    color: #fff;
+  }
+
+  .stack .cur span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .island,
+    .shape,
+    .frame,
+    .page {
+      transform: none !important;
+      transition: opacity 150ms ease;
+    }
+
+    .bars span {
+      transform: scaleY(0.6);
+    }
+
+    .shape.active.on .bars span {
+      animation: none;
+    }
+  }
+</style>
