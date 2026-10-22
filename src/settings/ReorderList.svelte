@@ -1,7 +1,14 @@
 <script lang="ts">
   import { tick } from "svelte";
   import Switch from "./Switch.svelte";
-  import { ROW_HEIGHT, type Row } from "./rows";
+  import {
+    dropIndex,
+    rowOffset,
+    settleOffset,
+    type Drag,
+    type Row,
+    type Settle,
+  } from "./rows";
 
   export let label: string;
   export let rows: Row[];
@@ -10,21 +17,14 @@
 
   let list: HTMLUListElement;
 
-  // The row under the pointer: where it started, where it would drop, and how far it moved.
-  let drag: { id: string; from: number; to: number; startY: number; dy: number } | null =
-    null;
-  // After a drop the moved rows hold their visual place for one frame, then glide to rest.
-  let settle: { id: string; y: number } | null = null;
+  // The row under the pointer. `startY` is only needed while the pointer is down.
+  let drag: (Drag & { startY: number }) | null = null;
+  // After a drop the moved row holds its visual place until the next render, then glides to rest.
+  let settle: Settle | null = null;
 
-  // The vertical offset of a row. Rows between the start and the drop point step aside.
-  function offset(row: Row, index: number): number {
-    if (settle) return row.id === settle.id ? settle.y : 0;
-    if (!drag) return 0;
-    if (row.id === drag.id) return drag.dy;
-    if (index > drag.from && index <= drag.to) return -ROW_HEIGHT;
-    if (index < drag.from && index >= drag.to) return ROW_HEIGHT;
-    return 0;
-  }
+  // Each row's offset, read in this reactive statement so every change to drag or settle
+  // reaches the style. A call made only inside the markup would not re-run on those changes.
+  $: offsets = rows.map((row, index) => rowOffset(row.id, index, drag, settle));
 
   function grab(event: PointerEvent, index: number): void {
     if (event.button !== 0) return;
@@ -35,9 +35,7 @@
   function carry(event: PointerEvent): void {
     if (!drag) return;
     const dy = event.clientY - drag.startY;
-    const slots = Math.round(dy / ROW_HEIGHT);
-    const to = Math.min(Math.max(drag.from + slots, 0), rows.length - 1);
-    drag = { ...drag, dy, to };
+    drag = { ...drag, dy, to: dropIndex(drag.from, dy, rows.length) };
   }
 
   function drop(): void {
@@ -46,9 +44,15 @@
     drag = null;
     if (to === from) return;
     // The row keeps the offset it had under the pointer, measured from its new slot.
-    settle = { id, y: dy - (to - from) * ROW_HEIGHT };
+    const next: Settle = { id, y: settleOffset(dy, from, to) };
+    settle = next;
     onmove(id, to);
-    requestAnimationFrame(() => requestAnimationFrame(() => (settle = null)));
+    // Once the offset is in the DOM, a forced style pass records it as the start of the glide.
+    // Clearing it then lets the row transition from there into its slot. A newer drop keeps its own.
+    void tick().then(() => {
+      void list.getBoundingClientRect();
+      if (settle === next) settle = null;
+    });
   }
 
   function cancel(): void {
@@ -79,7 +83,7 @@
       class:still={settle !== null || drag?.id === row.id}
       class:lifted={drag?.id === row.id}
       data-id={row.id}
-      style="transform: translateY({offset(row, index)}px)"
+      style="transform: translateY({offsets[index]}px)"
     >
       <button
         type="button"
@@ -91,6 +95,7 @@
         onpointermove={carry}
         onpointerup={drop}
         onpointercancel={cancel}
+        onlostpointercapture={cancel}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" />

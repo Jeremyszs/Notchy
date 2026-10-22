@@ -33,3 +33,51 @@ export function moveRow(rows: Row[], id: string, to: number): Row[] {
   next.splice(to, 0, row);
   return next;
 }
+
+/** A row drag in progress. `from` and `to` are indexes; `dy` is the pointer travel in px. */
+export interface Drag {
+  id: string;
+  from: number;
+  to: number;
+  dy: number;
+}
+
+/** A row that was just dropped. It keeps `y` px of offset until it glides into its slot. */
+export interface Settle {
+  id: string;
+  y: number;
+}
+
+/**
+ * The vertical offset in px of the row `id` at `index`. A drag wins: the dragged row follows the
+ * pointer and the rows between its start and drop point step aside by one row. Otherwise only the
+ * settling row is offset.
+ */
+export function rowOffset(
+  id: string,
+  index: number,
+  drag: Drag | null,
+  settle: Settle | null,
+): number {
+  if (drag) {
+    if (id === drag.id) return drag.dy;
+    if (index > drag.from && index <= drag.to) return -ROW_HEIGHT;
+    if (index < drag.from && index >= drag.to) return ROW_HEIGHT;
+    return 0;
+  }
+  return settle && id === settle.id ? settle.y : 0;
+}
+
+/**
+ * The offset a dropped row keeps so it stays under the pointer in its new slot. Rows are
+ * ROW_HEIGHT apart, so the offset is what the pointer travelled beyond the whole rows it moved.
+ */
+export function settleOffset(dy: number, from: number, to: number): number {
+  return dy - (to - from) * ROW_HEIGHT;
+}
+
+/** The drop slot for a pointer that moved `dy` px from row `from`, clamped to the list. */
+export function dropIndex(from: number, dy: number, length: number): number {
+  const slots = Math.round(dy / ROW_HEIGHT);
+  return Math.min(Math.max(from + slots, 0), length - 1);
+}
