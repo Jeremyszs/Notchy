@@ -11,6 +11,7 @@ export interface Config {
   confirmLock: boolean;
   launchAtLogin: boolean;
   font: FontId;
+  hud: boolean;
 }
 
 // The backend defaults. The notch uses them until the first answer arrives.
@@ -30,6 +31,7 @@ export const DEFAULT_CONFIG: Config = {
   confirmLock: true,
   launchAtLogin: false,
   font: "inter",
+  hud: true,
 };
 
 const store = writable<Config>(DEFAULT_CONFIG);

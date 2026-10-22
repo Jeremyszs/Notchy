@@ -5,6 +5,7 @@ A Dynamic Island-style notch overlay for Windows. Tauri 2 (Rust) + Svelte 5 + Ty
 - **Idle**: small black pill at the top center of the primary monitor.
 - **Active** (media playing): the pill widens, showing album art and equalizer bars. The bars follow the system's audio output while this pill is on screen (see Audio levels below), and animate on a timer otherwise.
 - **Expanded** (hover): two pages, switched by the dots, a wheel turn, or a horizontal swipe. The **Media** page shows album art, title, artist, the current synced lyric line (or "Playing from <app>" when there are no lyrics), and previous / play-pause / next controls. The **Controls** page has volume and brightness sliders and toggle tiles (Wi-Fi, Bluetooth, airplane, mute, keep awake, lock), driven by the controls backend. Opening the panel picks the page: the last one if it was left within 8 s, otherwise Media when something is playing, else Controls. The page list lives in `src/stores/pages.ts`. On the Media page, when the track has synced lyrics, hovering widens the panel into a lyrics layout: circular album art, large transport controls centred under it, and three lyric lines (the current one up to two lines) over a tint taken from the album art.
+- **HUD** (the system volume, mute or panel brightness changed): the pill widens into a slim bar for about 1.6 s, then gives way again. Each new change restarts that time. Hover still wins, and a fullscreen app still hides the notch (see Volume and brightness HUD below).
 - **Tucked** (a window sits under the notch): shrinks to a thin sliver. Hover it for 250 ms to open it.
 - **Hidden** (a fullscreen app owns the monitor): fully invisible and non-interactive.
 
@@ -57,6 +58,10 @@ Each recompute also runs a settle step. Fullscreen commits only after it has rea
 
 A tucked sliver only expands after the cursor has stayed on it for 250 ms (`TUCKED_HOVER_DWELL` in `window.rs`), so sweeping across an app's tab strip does not pop the island open. Leaving is immediate.
 
+**Volume and brightness HUD:** `modules/hud.rs` shows a slim HUD when the system volume, mute or panel brightness changes. It emits `hud://update` with `{kind, level, muted}` and holds the `hud` island state (`IslandState::Hud`) for 1.6 s after the last change, so each new change restarts that time. Volume is event-driven: `modules/hud/volume.rs` registers an `IAudioEndpointVolumeCallback` on the default output, so every change is seen whatever caused it (volume keys, Settings, another app). An `IMMNotificationClient` re-attaches it when the default output changes. Brightness is event-driven too: `modules/hud/brightness.rs` watches WMI's `WmiMonitorBrightnessEvent` in `root\WMI`, which the laptop panel's driver raises on a change. Nothing polls. The scheduler drops repeats, coalesces a key-repeat burst into updates at most about 33 ms apart (the newest value always lands), and keeps the hold running from the newest change. Precedence: fullscreen hides the HUD, hover wins over it (the panel opens as usual), and the HUD shows over Tucked and Active. Changes made by the panel's own sliders are ignored: volume writes carry an event context GUID that the callback drops, and brightness writes are absorbed for 2 s. The setting is `hud` in `config.json` (Settings > General).
+
+The HUD does not hide the native Windows volume or brightness OSD. Windows draws its own flyout for the volume and brightness keys, and Notchy has no safe, documented hook to suppress it, so both appear. Brightness only shows where the panel's driver raises the WMI brightness event. External monitors (DDC/CI) raise no event, so they show no HUD.
+
 ## Quick controls
 
 `modules/controls.rs` backs the notch's quick settings. Each control is a `Control` impl in `modules/controls/`, listed in the `CONTROLS` registry. Nothing polls: the frontend calls `controls_list` when the notch opens, `controls_set` for sliders and toggles, and `controls_press` for buttons. Unavailable controls come back with `supported: false` and a reason in `detail`.
@@ -67,7 +72,7 @@ Ids: `volume`, `mute`, `mic`, `brightness`, `wifi`, `bluetooth`, `airplane`, `lo
 
 The tray icon opens **Settings** on left-click (or from its menu). Settings is a second window, built on first use and hidden, not closed, when you close it. The tray menu also has **Quit Notchy**, the only way to exit the app.
 
-Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, confirm before locking, and launch at login. Every change saves at once and applies live.
+Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, the volume and brightness HUD, confirm before locking, and launch at login. Every change saves at once and applies live.
 
 The file is `config.json` in the app config directory (`%APPDATA%\com.notchy.app\config.json`). `config.rs` owns it: a missing or corrupt file gives the defaults, and saves are written through a temp file and renamed. Launch at login is the `Notchy` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 
@@ -92,3 +97,4 @@ Apple's SF is **not bundled**. Its licence limits use to Apple platforms, so Not
 - Pill sizes are defined in both `state.rs` (hit-testing) and `Island.svelte` (rendering). Keep them in sync. The window is 720 x 240 (`tauri.conf.json` and `window.rs`), which holds the largest pill, the 620 x 214 lyrics layout.
 - Album art is read once per track; an app that publishes its thumbnail late may show the placeholder.
 - Only the primary monitor is supported.
+- The volume and brightness HUD follows the default output and the built-in panel. External monitors show no brightness HUD, and the native Windows OSD still appears alongside it.

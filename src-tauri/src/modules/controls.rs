@@ -12,6 +12,10 @@ mod radio;
 mod system;
 mod theme;
 
+pub(crate) use display::{
+    init_process_security, read_percent as brightness_percent, watch_changes as watch_brightness,
+};
+
 use std::future::IntoFuture;
 
 use serde::Serialize;
@@ -86,10 +90,10 @@ static CONTROLS: &[&dyn Control] = &[
 
 /// CoInitializeEx must be paired with CoUninitialize on the same thread. Only the success path
 /// (including S_FALSE) increments the count, so only that path gets undone.
-struct ComGuard;
+pub(crate) struct ComGuard;
 
 impl ComGuard {
-    fn init() -> Option<Self> {
+    pub(crate) fn init() -> Option<Self> {
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
             .is_ok()
             .then_some(Self)

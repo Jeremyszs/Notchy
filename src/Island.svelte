@@ -15,6 +15,8 @@
   import { tint } from "./stores/tint";
   import { levels } from "./stores/audio";
   import { refresh as refreshControls } from "./stores/controls";
+  import { hud } from "./stores/hud";
+  import { hudFill, hudIcon, hudLabel, type HudIcon } from "./lib/hud";
   import ControlsPage from "./ControlsPage.svelte";
   import { fade, fly } from "svelte/transition";
   import { islandPath } from "./lib/shape";
@@ -30,10 +32,17 @@
   const SIZES: Record<Shown, { w: number; h: number; ear: number }> = {
     idle: { w: 120, h: 30, ear: 10 },
     active: { w: 200, h: 30, ear: 10 },
+    hud: { w: 260, h: 30, ear: 10 },
     expanded: { w: 380, h: 184, ear: 10 },
     lyrics: { w: 620, h: 214, ear: 10 },
     tucked: { w: 64, h: 5, ear: 2.5 },
   };
+
+  // The HUD row. Its icon, bar and value follow the last change the backend sent.
+  $: hudIconName = hudIcon($hud);
+  $: hudFraction = hudFill($hud);
+  $: hudText = hudLabel($hud);
+  $: hudMuted = $hud.kind === "volume" && $hud.muted;
 
   // Pages slide this far sideways as they change. Reduced motion keeps only the fade.
   const PAGE_SHIFT = 16;
@@ -212,6 +221,24 @@
   </div>
 {/snippet}
 
+{#snippet hudGlyph(icon: HudIcon)}
+  {#if icon === "sun"}
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+  {:else}
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    {#if icon === "low" || icon === "high"}
+      <path d="M16 9.5a3.5 3.5 0 0 1 0 5" />
+    {/if}
+    {#if icon === "high"}
+      <path d="M19 6.5a8 8 0 0 1 0 11" />
+    {/if}
+    {#if icon === "muted"}
+      <path class="slash" d="M17 9l5 6M22 9l-5 6" />
+    {/if}
+  {/if}
+{/snippet}
+
 {#snippet outline(name: Shown)}
   {@const { w, h, ear } = SIZES[name]}
   <svg
@@ -255,6 +282,30 @@
             <span style={$levels ? `transform: scaleY(${$levels[bar]})` : undefined}></span>
           {/each}
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="shape hud"
+    class:on={$islandState === "hud"}
+    style={shapeStyle("hud", shown)}
+    aria-hidden="true"
+  >
+    <div class="frame" style={frameStyle("hud", shown)}>
+      {@render outline("hud")}
+      <div class="content hud-row" class:brightness={$hud.kind === "brightness"}>
+        <div class="hud-icon" class:muted={hudMuted}>
+          {#key hudIconName}
+            <svg class="glyph" viewBox="0 0 24 24" in:fade={{ duration: 160 }} out:fade={{ duration: 110 }}>
+              {@render hudGlyph(hudIconName)}
+            </svg>
+          {/key}
+        </div>
+        <div class="hud-track">
+          <span class="hud-fill" style="transform: scaleX({hudFraction})"></span>
+        </div>
+        <span class="hud-value">{hudText}</span>
       </div>
     </div>
   </div>
@@ -607,6 +658,80 @@
     }
   }
 
+  /* The HUD row. The bar is a track with a fill that scales from its left edge, so a key repeat
+     glides to each new level. Only transform moves. The track's radius clips the fill's ends. */
+  .hud-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+  }
+
+  .hud-icon {
+    position: relative;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    color: #fff;
+  }
+
+  /* The icon swaps by crossfading two glyphs that sit on top of each other. */
+  .hud-icon .glyph {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .hud-icon .slash {
+    stroke: #ff6b6b;
+  }
+
+  .hud-icon.muted {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .hud-row.brightness .hud-icon {
+    color: #ffd166;
+  }
+
+  .hud-track {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .hud-fill {
+    position: absolute;
+    inset: 0;
+    transform-origin: left center;
+    transition: transform 120ms ease-out;
+    background: linear-gradient(to right, #7dd3fc, #ffffff);
+  }
+
+  .hud-row.brightness .hud-fill {
+    background: linear-gradient(to right, #ffd166, #fff3c4);
+  }
+
+  .hud-value {
+    flex: none;
+    width: 34px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
   .panel {
     display: flex;
     flex-direction: column;
@@ -923,6 +1048,11 @@
 
     .shape.active.on .bars span {
       animation: none;
+    }
+
+    /* The bar still shows the level, but it jumps to it rather than gliding. */
+    .hud-fill {
+      transition: none;
     }
   }
 </style>

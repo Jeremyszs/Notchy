@@ -13,6 +13,8 @@ use state::{IslandStateMachine, SharedIsland};
 use tauri::Manager;
 
 fn main() {
+    // Before Tauri or any module touches COM. See `init_process_security`.
+    modules::controls::init_process_security();
     tauri::Builder::default()
         .manage::<SharedIsland>(Arc::new(Mutex::new(IslandStateMachine::default())))
         .manage(modules::audio::AudioController::default())

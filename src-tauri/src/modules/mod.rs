@@ -8,6 +8,7 @@
 pub mod audio;
 pub mod context;
 pub mod controls;
+pub mod hud;
 pub mod lyrics;
 pub mod media;
 
@@ -33,10 +34,11 @@ pub fn start_all(app: &AppHandle) {
         app: app.clone(),
         island: app.state::<SharedIsland>().inner().clone(),
     };
-    let modules: [&dyn Module; 3] = [
+    let modules: [&dyn Module; 4] = [
         &media::MediaModule,
         &lyrics::LyricsModule,
         &context::ContextModule,
+        &hud::HudModule,
     ];
     for module in modules {
         if cfg!(debug_assertions) {

@@ -63,6 +63,8 @@ pub struct Config {
     pub launch_at_login: bool,
     /// The font id from FONTS. Unknown ids are sanitized to the default.
     pub font: String,
+    /// Briefly show the volume and brightness HUD when either changes.
+    pub hud: bool,
 }
 
 impl Default for Config {
@@ -74,6 +76,7 @@ impl Default for Config {
             confirm_lock: true,
             launch_at_login: false,
             font: DEFAULT_FONT.to_string(),
+            hud: true,
         }
     }
 }
@@ -140,6 +143,12 @@ pub fn lock(shared: &SharedConfig) -> MutexGuard<'_, Config> {
 pub fn lyrics_enabled(app: &AppHandle) -> bool {
     app.try_state::<SharedConfig>()
         .is_none_or(|config| lock(&config).lyrics)
+}
+
+/// Whether the volume and brightness HUD shows. Defaults to on when no config is managed yet.
+pub fn hud_enabled(app: &AppHandle) -> bool {
+    app.try_state::<SharedConfig>()
+        .is_none_or(|config| lock(&config).hud)
 }
 
 /// The settings file inside the app config directory.
@@ -357,6 +366,15 @@ mod tests {
         assert!(json.contains("\"launchAtLogin\":false"));
         assert!(json.contains("\"pages\":[\"media\",\"controls\"]"));
         assert!(json.contains("\"font\":\"inter\""));
+        assert!(json.contains("\"hud\":true"));
+    }
+
+    #[test]
+    fn file_without_a_hud_setting_turns_it_on() {
+        let config: Config = serde_json::from_str(r#"{"lyrics": false}"#).unwrap();
+        assert!(config.hud);
+        let off: Config = serde_json::from_str(r#"{"hud": false}"#).unwrap();
+        assert!(!off.hud);
     }
 
     #[test]

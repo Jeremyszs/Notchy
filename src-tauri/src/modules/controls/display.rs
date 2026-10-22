@@ -4,7 +4,13 @@
 
 use std::ffi::c_void;
 use std::mem::{ManuallyDrop, size_of};
-use std::sync::Once;
+use std::thread;
+use std::time::Duration;
+
+use crate::modules::hud::note_own_brightness_write;
+
+/// How long to wait before resubscribing to brightness events after a failure.
+const WATCH_RETRY: Duration = Duration::from_secs(5);
 
 use windows::Win32::Devices::Display::{
     DISPLAY_BRIGHTNESS, DISPLAYPOLICY_AC, DISPLAYPOLICY_DC, DestroyPhysicalMonitors,
@@ -18,8 +24,8 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, CoCreateInstance, CoInitializeSecurity, EOAC_NONE,
-    RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+    CoInitializeSecurity, EOAC_NONE, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Variant::{
@@ -27,8 +33,8 @@ use windows::Win32::System::Variant::{
 };
 use windows::Win32::System::Wmi::{
     CIM_UINT8, CIM_UINT32, IEnumWbemClassObject, IWbemClassObject, IWbemContext, IWbemLocator,
-    IWbemServices, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_WBEM_COMPLETE, WBEM_INFINITE,
-    WbemLocator,
+    IWbemServices, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY,
+    WBEM_FLAG_RETURN_WBEM_COMPLETE, WBEM_INFINITE, WbemLocator,
 };
 use windows::core::{BSTR, IUnknown, w};
 
@@ -55,10 +61,7 @@ impl Control for Brightness {
     }
 
     fn read(&self) -> Result<Reading, String> {
-        let level = lcd_read()
-            .or_else(|| wmi_read().ok())
-            .or_else(ddc_read)
-            .ok_or_else(|| UNSUPPORTED.to_owned())?;
+        let level = read_percent().ok_or_else(|| UNSUPPORTED.to_owned())?;
         Ok(Reading {
             value: f64::from(level),
             detail: None,
@@ -67,10 +70,61 @@ impl Control for Brightness {
 
     fn write(&self, value: f64) -> Result<(), String> {
         let level = percent(value) as u8;
+        // Marked before the write, so the change it causes is not taken for a key press.
+        note_own_brightness_write();
         lcd_write(level)
             .or_else(|| wmi_write(level).ok())
             .or_else(|| ddc_write(level))
             .ok_or_else(|| UNSUPPORTED.to_owned())
+    }
+}
+
+/// Current brightness as a percent, from the first source that answers: the panel's LCD device,
+/// then WMI, then DDC/CI.
+pub(crate) fn read_percent() -> Option<u8> {
+    lcd_read()
+        .or_else(|| wmi_read().ok())
+        .or_else(ddc_read)
+        .and_then(|level| u8::try_from(level).ok())
+}
+
+/// Calls `changed` each time the built-in panel reports a brightness change. Subscribes through
+/// WMI's `WmiMonitorBrightnessEvent`, which the panel's driver raises on a key press or a change in
+/// the Settings app, so nothing polls. Blocks for the life of the app and resubscribes after a
+/// failure. The caller's thread must hold COM.
+pub(crate) fn watch_changes(mut changed: impl FnMut()) {
+    loop {
+        if let Err(error) = wmi_watch(&mut changed)
+            && cfg!(debug_assertions)
+        {
+            eprintln!("notchy: brightness events unavailable: {error}");
+        }
+        thread::sleep(WATCH_RETRY);
+    }
+}
+
+/// One WMI subscription. Returns only when the subscription fails. A notification query takes
+/// RETURN_IMMEDIATELY with FORWARD_ONLY. FORWARD_ONLY alone is refused with WBEM_E_INVALID_PARAMETER.
+fn wmi_watch(changed: &mut impl FnMut()) -> Result<(), String> {
+    let services = wmi_services()?;
+    let events = unsafe {
+        services.ExecNotificationQuery(
+            &BSTR::from("WQL"),
+            &BSTR::from("SELECT * FROM WmiMonitorBrightnessEvent"),
+            WBEM_FLAG_RETURN_IMMEDIATELY | WBEM_FLAG_FORWARD_ONLY,
+            None::<&IWbemContext>,
+        )
+    }
+    .map_err(|error| format!("ExecNotificationQuery {:#010x}", error.code().0))?;
+    loop {
+        let mut slot: [Option<IWbemClassObject>; 1] = [None];
+        let mut returned = 0;
+        unsafe { events.Next(WBEM_INFINITE, &mut slot, &mut returned) }
+            .ok()
+            .map_err(|error| format!("Next {:#010x}", error.code().0))?;
+        if returned > 0 {
+            changed();
+        }
     }
 }
 
@@ -181,30 +235,30 @@ fn nearest_level(levels: &[u8], target: u8) -> Option<u8> {
         .min_by_key(|level| (level.abs_diff(target), *level))
 }
 
-/// WMI needs process-wide COM security before its first call. Only the first call takes effect,
-/// and a later one (from another component) fails harmlessly.
-fn wmi_security() {
-    static SECURITY: Once = Once::new();
-    SECURITY.call_once(|| {
-        let _ = unsafe {
-            CoInitializeSecurity(
-                None,
-                -1,
-                None,
-                None,
-                RPC_C_AUTHN_LEVEL_DEFAULT,
-                RPC_C_IMP_LEVEL_IMPERSONATE,
-                None,
-                EOAC_NONE,
-                None,
-            )
-        };
-    });
+/// Sets the process's COM security for WMI. Call it on the main thread before any other COM use.
+/// Windows applies default security at the first COM call, and after that `CoInitializeSecurity`
+/// is refused. Event subscriptions then fail with WBEM_E_ACCESS_DENIED, so the brightness HUD
+/// would never see a change. The main thread takes its apartment first, which is what Tauri expects
+/// anyway, and a repeat call simply fails.
+pub(crate) fn init_process_security() {
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let _ = unsafe {
+        CoInitializeSecurity(
+            None,
+            -1,
+            None,
+            None,
+            RPC_C_AUTHN_LEVEL_DEFAULT,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+            None,
+        )
+    };
 }
 
 /// A connection to the `root\WMI` namespace. The caller's thread must hold COM.
 fn wmi_services() -> Result<IWbemServices, String> {
-    wmi_security();
     unsafe {
         let locator: IWbemLocator =
             CoCreateInstance(&WbemLocator, None::<&IUnknown>, CLSCTX_INPROC_SERVER)

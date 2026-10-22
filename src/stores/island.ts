@@ -2,7 +2,14 @@ import { readable } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type IslandState = "idle" | "active" | "expanded" | "lyrics" | "tucked" | "hidden";
+export type IslandState =
+  | "idle"
+  | "active"
+  | "expanded"
+  | "lyrics"
+  | "tucked"
+  | "hud"
+  | "hidden";
 
 // The Rust side owns the state machine and pushes every change, so the store
 // only mirrors it. Starts at "idle" until the first event arrives.

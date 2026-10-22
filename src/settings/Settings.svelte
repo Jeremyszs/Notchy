@@ -29,6 +29,7 @@
   let pageRows: Row[] = [];
   let controlRows: Row[] = [];
   let lyrics = DEFAULT_CONFIG.lyrics;
+  let showHud = DEFAULT_CONFIG.hud;
   let confirmLock = DEFAULT_CONFIG.confirmLock;
   let launchAtLogin = DEFAULT_CONFIG.launchAtLogin;
   let font: FontId = DEFAULT_CONFIG.font;
@@ -109,6 +110,7 @@
       confirmLock,
       launchAtLogin,
       font,
+      hud: showHud,
     };
   }
 
@@ -162,6 +164,7 @@
       (id) => names.get(id) ?? id,
     );
     lyrics = settings.lyrics;
+    showHud = settings.hud;
     confirmLock = settings.confirmLock;
     launchAtLogin = settings.launchAtLogin;
     font = settings.font;
@@ -278,6 +281,17 @@
             label="Show lyrics"
             onchange={(on) => {
               lyrics = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Volume and brightness HUD</span></span>
+          <Switch
+            checked={showHud}
+            label="Volume and brightness HUD"
+            onchange={(on) => {
+              showHud = on;
               scheduleSave();
             }}
           />

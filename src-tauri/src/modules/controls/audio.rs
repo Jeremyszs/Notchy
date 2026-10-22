@@ -1,7 +1,5 @@
 //! Volume, output mute and microphone mute, through the default Core Audio endpoints.
 
-use std::ptr;
-
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eConsole, eRender,
@@ -10,6 +8,7 @@ use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
 use windows::core::IUnknown;
 
 use super::{Control, Kind, Reading, error_text, flag, is_on, percent};
+use crate::modules::hud::OWN_CONTEXT;
 
 const NO_OUTPUT: &str = "No audio output";
 const NO_MICROPHONE: &str = "No microphone";
@@ -57,7 +56,8 @@ impl Control for Volume {
     fn write(&self, value: f64) -> Result<(), String> {
         let volume = endpoint(eRender, NO_OUTPUT)?;
         let scalar = (percent(value) / 100.0) as f32;
-        unsafe { volume.SetMasterVolumeLevelScalar(scalar, ptr::null()) }
+        // Tagged with OWN_CONTEXT, so the volume HUD ignores the change this slider makes.
+        unsafe { volume.SetMasterVolumeLevelScalar(scalar, &OWN_CONTEXT) }
             .map_err(|error| error_text(&error))
     }
 }
@@ -88,7 +88,7 @@ impl Control for Mute {
 
     fn write(&self, value: f64) -> Result<(), String> {
         let volume = endpoint(eRender, NO_OUTPUT)?;
-        unsafe { volume.SetMute(is_on(value), ptr::null()) }.map_err(|error| error_text(&error))
+        unsafe { volume.SetMute(is_on(value), &OWN_CONTEXT) }.map_err(|error| error_text(&error))
     }
 }
 
@@ -119,7 +119,7 @@ impl Control for Mic {
 
     fn write(&self, value: f64) -> Result<(), String> {
         let microphone = endpoint(eCapture, NO_MICROPHONE)?;
-        unsafe { microphone.SetMute(!is_on(value), ptr::null()) }
+        unsafe { microphone.SetMute(!is_on(value), std::ptr::null()) }
             .map_err(|error| error_text(&error))
     }
 }
