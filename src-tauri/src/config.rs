@@ -353,10 +353,17 @@ pub fn file_in(dir: &Path) -> PathBuf {
 /// A partial file keeps the fields it has. A leading UTF-8 byte order mark is skipped, since
 /// Windows PowerShell writes one and a parser would otherwise reject the whole file.
 pub fn load(path: &Path) -> Config {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Config>(strip_bom(&text)).ok())
-        .map_or_else(Config::default, Config::sanitize)
+    match fs::read_to_string(path) {
+        Ok(text) => {
+            if let Ok(config) = serde_json::from_str::<Config>(strip_bom(&text)) {
+                return config.sanitize();
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Config::default(),
+        Err(_) => {}
+    }
+    let _ = fs::copy(path, path.with_extension("json.bak"));
+    Config::default()
 }
 
 /// The text without a leading byte order mark (U+FEFF), if it has one.
@@ -408,8 +415,9 @@ pub fn is_dev_exe(exe: &Path) -> bool {
 }
 
 /// Decides the Run entry for a setting. Debug builds never touch it (a debug exe needs the Vite
-/// dev server and opens a console, so it must not start at sign-in), and a release build only
-/// registers an exe that `is_dev_exe` accepts. Turning the setting off removes the entry.
+/// dev server and opens a console, so it must not start at sign-in), and a release build never
+/// registers an exe that `is_dev_exe` recognises as a debug build. Turning the setting off removes
+/// the entry.
 pub fn plan_run_entry(enabled: bool, debug_build: bool, exe: Option<&Path>) -> RunEntry {
     if debug_build {
         return RunEntry::Skip("debug build: launch at login is not changed");
@@ -804,6 +812,7 @@ mod tests {
     fn missing_file_gives_defaults() {
         let dir = scratch("missing");
         assert_eq!(load(&file_in(&dir)), Config::default());
+        assert!(!file_in(&dir).with_extension("json.bak").exists());
     }
 
     #[test]
@@ -813,6 +822,36 @@ mod tests {
         let path = file_in(&dir);
         fs::write(&path, "{ not json").unwrap();
         assert_eq!(load(&path), Config::default());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_wrong_typed_config_field_is_backed_up_before_returning_defaults() {
+        let dir = scratch("wrong-type");
+        fs::create_dir_all(&dir).unwrap();
+        let path = file_in(&dir);
+        let original = r#"{"calendar": {"allDayHour": "x"}}"#;
+        fs::write(path.with_extension("json.bak"), "old backup").unwrap();
+        fs::write(&path, original).unwrap();
+        assert_eq!(load(&path), Config::default());
+        assert_eq!(
+            fs::read_to_string(path.with_extension("json.bak")).unwrap(),
+            original
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_config_file_is_backed_up_before_returning_defaults() {
+        let dir = scratch("invalid-utf8");
+        fs::create_dir_all(&dir).unwrap();
+        let path = file_in(&dir);
+        let bytes = [0xFF, 0xFE, 0x00];
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(load(&path), Config::default());
+        assert_eq!(fs::read(path.with_extension("json.bak")).unwrap(), bytes);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -9,8 +9,8 @@
 //!   again. Losing it is harmless beyond a repeat, so a bad file just starts empty.
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -51,8 +51,13 @@ fn strip_bom(text: &str) -> &str {
 /// The events in the file. Missing gives none. Unreadable, or another version, is set aside as
 /// `.bak` first, and the calendar starts empty.
 pub fn load_events(path: &Path) -> Vec<CalendarEvent> {
-    let Ok(text) = fs::read_to_string(path) else {
-        return Vec::new();
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Vec::new(),
+        Err(_) => {
+            set_aside(path);
+            return Vec::new();
+        }
     };
     match serde_json::from_str::<EventsFile>(strip_bom(&text)) {
         Ok(file) if file.version == VERSION => file.events,
@@ -118,7 +123,10 @@ fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
         fs::create_dir_all(dir)?;
     }
     let temp = path.with_extension("json.tmp");
-    fs::write(&temp, json)?;
+    let mut file = File::create(&temp)?;
+    file.write_all(&json)?;
+    file.sync_all()?;
+    drop(file);
     fs::rename(&temp, path)
 }
 
@@ -184,6 +192,17 @@ mod tests {
             fs::read_to_string(path.with_extension("json.bak")).unwrap(),
             "{ not json"
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_events_file_is_set_aside() {
+        let dir = scratch("invalid-utf8");
+        let path = dir.join(EVENTS_FILE);
+        let bytes = [0xFF, 0xFE, 0x00];
+        fs::write(&path, bytes).unwrap();
+        assert!(load_events(&path).is_empty());
+        assert_eq!(fs::read(path.with_extension("json.bak")).unwrap(), bytes);
         fs::remove_dir_all(&dir).unwrap();
     }
 

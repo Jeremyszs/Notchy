@@ -176,10 +176,10 @@ mod tests {
 
     #[test]
     fn a_failed_save_undoes_the_change() {
-        // The events file cannot be written where a directory sits, so the save fails.
+        // The parent cannot be created where a regular file sits, so the save fails.
         let dir = scratch("failed-save");
         let path = dir.join("blocked");
-        std::fs::create_dir_all(path.join(store::EVENTS_FILE)).unwrap();
+        std::fs::write(&path, "blocked").unwrap();
         let mut source = LocalSource::open(path.join(store::EVENTS_FILE));
         assert!(
             source

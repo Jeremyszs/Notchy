@@ -52,7 +52,7 @@
     PageDown: "pageDown",
   };
 
-  const today = dateKey(new Date());
+  let today = dateKey(new Date());
   let selected = today;
   // -1 for a move back in time, 1 for forward. The month's slide follows it.
   let direction = 0;
@@ -87,7 +87,10 @@
         loadError = "";
       }
     } catch (error) {
-      if (id === request) loadError = String(error);
+      if (id === request) {
+        loadError = String(error);
+        instances = [];
+      }
     }
   }
 
@@ -191,6 +194,10 @@
   }
 
   onMount(() => {
+    const refreshToday = () => {
+      today = dateKey(new Date());
+    };
+    window.addEventListener("focus", refreshToday);
     let stop: (() => void) | undefined;
     let gone = false;
     listen<string>("calendar://add-note", (event) => openAddFor(event.payload)).then((off) => {
@@ -204,6 +211,7 @@
       () => {},
     );
     return () => {
+      window.removeEventListener("focus", refreshToday);
       gone = true;
       stop?.();
     };
@@ -311,7 +319,9 @@
                 {/if}
               </span>
               {#if confirmingKey === noteKey(note)}
-                <span class="confirm">Delete?</span>
+                <span class="confirm">
+                  {(seriesOf(note)?.recurrence ?? "none") !== "none" ? "Delete all occurrences?" : "Delete?"}
+                </span>
                 <button type="button" class="plain" onclick={() => (confirmingKey = null)}>Cancel</button>
                 <button type="button" class="destructive" onclick={() => remove(note)}>Delete</button>
               {:else}

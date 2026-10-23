@@ -3,8 +3,9 @@
 //!
 //! Times are local, naive date-times. A user who types 14:30 gets 14:30 on this PC, and nothing is
 //! stored in UTC, so a recurring event keeps its wall-clock time across a DST change. A time that
-//! does not exist on the spring-forward night still fires once the clock reaches it. On the autumn
-//! night a repeated hour fires once, because reminders are keyed by the wall-clock time.
+//! falls in the skipped spring-forward hour is treated as the wall-clock time; its reminder may be
+//! skipped when the jump makes it overdue by `OVERDUE_LIMIT` or more. On the autumn night a repeated
+//! hour fires once, because reminders are keyed by the wall-clock time.
 //!
 //! A series is one stored `CalendarEvent`. `instances` expands it into the occurrences that overlap a
 //! window. Every occurrence is computed from the series start, not from the one before, so a monthly
@@ -248,14 +249,14 @@ pub fn occurrence_starts(
 ) -> Vec<PrimitiveDateTime> {
     let start = event.start.0;
     let span = span(event);
-    let probe = from - span;
+    let probe = from.checked_sub(span).unwrap_or(from);
     let mut k = first_index(start, event.recurrence, probe);
     let mut starts = Vec::new();
     while let Some(occurrence) = occurrence_start(start, event.recurrence, k) {
         if occurrence >= to {
             break;
         }
-        if occurrence + span > from || occurrence >= from {
+        if occurrence >= from || occurrence.checked_add(span).is_some_and(|end| end > from) {
             starts.push(occurrence);
         }
         k += 1;
@@ -279,7 +280,7 @@ pub fn instances(
             title: event.title.clone(),
             notes: event.notes.clone(),
             start: LocalDateTime(start),
-            end: LocalDateTime(start + span),
+            end: LocalDateTime(start.checked_add(span).unwrap_or(start)),
             all_day: event.all_day,
             read_only,
             remind_before_minutes: event.remind_before_minutes.clone(),
@@ -417,6 +418,25 @@ mod tests {
         assert_eq!(LocalDateTime::parse("2026-10-23 10:00"), None);
         assert_eq!(LocalDateTime::parse("2026-10-23"), None);
         assert!(LocalDateTime::parse("2028-02-29T10:00").is_some());
+    }
+
+    #[test]
+    fn a_huge_duration_does_not_overflow_date_times() {
+        for start in [at(-9999, 1, 1, 0, 0), at(9999, 12, 30, 0, 0)] {
+            let mut event = event(start, Recurrence::None);
+            event.duration_minutes = Some(u32::MAX);
+            let to = start + Duration::days(1);
+            assert_eq!(occurrence_starts(&event, start, to), vec![start]);
+            let expanded = instances(&event, false, start, to);
+            assert_eq!(expanded.len(), 1);
+            assert_eq!(expanded[0].start.0, start);
+            assert_eq!(
+                expanded[0].end.0,
+                start.checked_add(span(&event)).unwrap_or(start)
+            );
+            // Also check an occurrence before the window when its end could overflow.
+            occurrence_starts(&event, start + Duration::hours(1), to);
+        }
     }
 
     #[test]
