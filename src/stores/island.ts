@@ -28,6 +28,19 @@ export const islandState = readable<IslandState>("idle", (set) => {
   };
 });
 
+let lyricsSizeSent = "";
+
+/**
+ * Tells the Rust hit area how big the lyrics layout is, so a notch widened or lengthened for a long
+ * line is still hovered over its whole body. Repeats are skipped.
+ */
+export function setLyricsSize(w: number, h: number): void {
+  const key = `${w}x${h}`;
+  if (key === lyricsSizeSent) return;
+  lyricsSizeSent = key;
+  void invoke("island_set_lyrics_size", { w, h });
+}
+
 let wideSent: boolean | null = null;
 
 /**

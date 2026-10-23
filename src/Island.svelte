@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { islandState, setWide, type IslandState } from "./stores/island";
+  import { islandState, setLyricsSize, setWide, type IslandState } from "./stores/island";
   import { mediaState, next, playPause, previous } from "./stores/media";
   import { currentLine, lyricsState } from "./stores/lyrics";
   import {
@@ -35,6 +35,7 @@
   import StatsPage from "./StatsPage.svelte";
   import { fade, fly } from "svelte/transition";
   import { islandPath } from "./lib/shape";
+  import { DEFAULT_FIT, fitTrack } from "./lib/lyricsFit";
   import { createWheelGesture } from "./lib/wheel";
 
   type Shown = Exclude<IslandState, "hidden">;
@@ -59,6 +60,46 @@
     lyrics: { w: 620, h: 224, ear: 10 },
     tucked: { w: 64, h: 5, ear: 2.5 },
   };
+
+  // The lyrics layout is sized for the track: 620 x 224 at rest, wider and then taller when a line is
+  // too long to show whole, and its text shrinks only as a last step. See lib/lyricsFit.ts. The
+  // size is worked out for every line of the track, so it holds still while the lines change.
+  let fontReady = 0;
+  if (typeof document !== "undefined" && document.fonts) {
+    void document.fonts.ready.then(() => (fontReady += 1));
+  }
+  let measureContext: CanvasRenderingContext2D | null = null;
+  let measureFont = "";
+  const measured = new Map<string, number>();
+
+  function measureText(text: string, px: number, weight: number): number {
+    measureContext ??= document.createElement("canvas").getContext("2d");
+    if (!measureContext) return text.length * px * 0.55;
+    // The app sets the face as the --font custom property on the root, not as font-family.
+    const family = getComputedStyle(document.documentElement).getPropertyValue("--font").trim() || "system-ui, sans-serif";
+    if (family !== measureFont) {
+      measureFont = family;
+      measured.clear();
+    }
+    const key = `${weight}|${px}|${text}`;
+    let width = measured.get(key);
+    if (width === undefined) {
+      measureContext.font = `${weight} ${px}px ${family}`;
+      width = measureContext.measureText(text).width;
+      measured.set(key, width);
+    }
+    return width;
+  }
+
+  // The font and the loaded faces are arguments only so that a change of either runs this again.
+  function fitLyrics(lines: string[], _font: string, _ready: number) {
+    return lines.length === 0 ? DEFAULT_FIT : fitTrack(lines, measureText);
+  }
+
+  $: lyricLines = $lyricsState.status === "synced" ? $lyricsState.lines.map((l) => l.text) : [];
+  $: lyricsFit = fitLyrics(lyricLines, $config.font, fontReady);
+  $: lyricsBox = { w: lyricsFit.w, h: lyricsFit.h };
+  $: setLyricsSize(lyricsBox.w, lyricsBox.h);
 
   // The HUD row. Its icon, bar and value follow the last change the backend sent.
   $: hudIconName = hudIcon($hud);
@@ -147,14 +188,20 @@
   // BLEED extends each outline this many px above the window top. See islandPath.
   const BLEED = 16;
 
-  function shapeStyle(shape: Shown, from: Shown): string {
-    const { w, h, ear } = SIZES[shape];
-    const sx = SIZES[from].w / w;
+  // The size of a shape. Only the lyrics layout changes, with the track (see lyricsBox).
+  function sizeOf(shape: Shown): { w: number; h: number; ear: number } {
+    return shape === "lyrics" ? { ...SIZES.lyrics, ...lyricsBox } : SIZES[shape];
+  }
+
+  // `_box` is unused. Passing lyricsBox makes the lyrics shape's style follow a new size.
+  function shapeStyle(shape: Shown, from: Shown, _box?: unknown): string {
+    const { w, h, ear } = sizeOf(shape);
+    const sx = sizeOf(from).w / w;
     return `width:${w + 2 * ear}px;height:${h}px;margin-left:${-(w / 2 + ear)}px;--w:${w}px;--ear:${ear}px;transform:scaleX(${sx})`;
   }
 
-  function frameStyle(shape: Shown, from: Shown): string {
-    const sy = SIZES[from].h / SIZES[shape].h;
+  function frameStyle(shape: Shown, from: Shown, _box?: unknown): string {
+    const sy = sizeOf(from).h / sizeOf(shape).h;
     return `transform:scaleY(${sy})`;
   }
 
@@ -342,8 +389,8 @@
   </span>
 {/snippet}
 
-{#snippet outline(name: Shown)}
-  {@const { w, h, ear } = SIZES[name]}
+{#snippet outline(name: Shown, _box?: unknown)}
+  {@const { w, h, ear } = sizeOf(name)}
   <svg
     class="outline"
     viewBox="0 {-BLEED} {w + 2 * ear} {h + BLEED}"
@@ -635,7 +682,7 @@
   <div
     class="shape lyrics"
     class:on={$islandState === "lyrics"}
-    style={shapeStyle("lyrics", shown)}
+    style={shapeStyle("lyrics", shown, lyricsBox)}
     role="group"
     aria-label="Lyrics panel"
     onwheel={onWheel}
@@ -643,10 +690,10 @@
     onpointerup={swipeEnd}
     onpointerleave={() => (swipeFrom = null)}
   >
-    <div class="frame" style={frameStyle("lyrics", shown)}>
-      {@render outline("lyrics")}
+    <div class="frame" style={frameStyle("lyrics", shown, lyricsBox)}>
+      {@render outline("lyrics", lyricsBox)}
       {#key $tint.id}
-        {@const { w, h, ear } = SIZES.lyrics}
+        {@const { w, h, ear } = sizeOf("lyrics")}
         <svg
           class="outline"
           viewBox="0 {-BLEED} {w + 2 * ear} {h + BLEED}"
@@ -676,7 +723,7 @@
           />
         </svg>
       {/key}
-      <div class="content wide">
+      <div class="content wide" style="--ls: {lyricsFit.scale}">
         <div class="wide-body">
           <div class="side">
             <div class="now-wide">
@@ -684,9 +731,9 @@
               <div class="meta">
                 <div class="heading">{$mediaState.title}</div>
                 <div class="artist">{$mediaState.artist}</div>
-                <MediaProgress />
               </div>
             </div>
+            <MediaProgress />
             {@render transport(true)}
           </div>
           <div class="stack-wrap">
@@ -1367,32 +1414,32 @@
     fill: currentColor;
   }
 
-  /* The lyrics layout's transport is twice the panel's, centred under the art in the left column.
-     Play is a little larger than the skip buttons. */
+  /* The lyrics layout's transport sits under the progress bar, centred in the left column. Play is a
+     little larger than the skip buttons. */
   .controls.compact {
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 14px;
   }
 
   .controls.compact button {
-    width: 60px;
-    height: 60px;
+    width: 44px;
+    height: 44px;
   }
 
   .controls.compact button.play {
-    width: 68px;
-    height: 68px;
+    width: 52px;
+    height: 52px;
   }
 
   .controls.compact svg {
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
   }
 
   .controls.compact button.play svg {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
   }
 
   .empty {
@@ -1419,15 +1466,15 @@
     margin-bottom: 8px;
   }
 
-  /* The left column is 250 px: art and text (250 less 88 px art and 12 px gap), then the
-     transport row of 68 px, 170 px in all. The column is centred in the 178 px body, so it has
-     4 px above and below. */
+  /* The left column is 250 px: art and text (250 less 88 px art and 12 px gap), the 14 px progress
+     row, then the transport row of 52 px, with 10 px gaps: 174 px in all. The column is centred in
+     the 178 px body, so it has 2 px above and below. */
   .side {
     display: flex;
     flex: none;
     flex-direction: column;
     justify-content: center;
-    gap: 14px;
+    gap: 10px;
     width: 250px;
   }
 
@@ -1438,6 +1485,15 @@
     min-width: 0;
   }
 
+  /* The title and the artist fill the art's 88 px: a two-line title (2 x 28), an 8 px gap and the
+     artist's 24 px line. The title sits on the art's top edge and the artist on its bottom edge,
+     so a one-line title still spans the same height. */
+  .now-wide .meta {
+    align-self: stretch;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   /* Two lines at most. A long title wraps rather than cutting off after one line. */
   .heading {
     display: -webkit-box;
@@ -1445,19 +1501,21 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    font-size: 19px;
+    font-size: 24px;
     font-weight: 600;
-    line-height: 23px;
+    line-height: 28px;
   }
 
   /* The lyrics layout's artist is one line, larger than in the panel. Only this layout changes. */
   .wide .artist {
-    font-size: 15px;
-    line-height: 18px;
+    font-size: 17px;
+    line-height: 24px;
   }
 
-  /* The stack is a fixed 132 px block, centred in the body, so a change of line length moves
-     nothing outside the block. Each block is absolute, so an outgoing block fades over the new one. */
+  /* The stack is centred in the body, and every line shows whole: a line that is too long for the
+     width wraps (the notch is sized for it, see lyricsFit.ts). --ls scales the text, and is 1 unless
+     a track's lines are too long even for the largest notch. Each block is absolute, so an outgoing
+     block fades over the new one. */
   .stack-wrap {
     position: relative;
     flex: 1;
@@ -1478,33 +1536,25 @@
   }
 
   .stack .ctx {
-    height: 26px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-size: 21px;
-    line-height: 26px;
+    min-height: calc(26px * var(--ls, 1));
+    overflow-wrap: anywhere;
+    font-size: calc(21px * var(--ls, 1));
+    line-height: calc(26px * var(--ls, 1));
     color: rgba(255, 255, 255, 0.4);
   }
 
-  /* Two lines of 32 px at most. A single line sits centred in the same 64 px box. */
+  /* Room for two lines of 32 px at least, so a short line sits centred in the same 64 px box and the
+     block does not jump. A longer line makes the box taller. */
   .stack .cur {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    height: 64px;
-    font-size: 27px;
+    min-height: calc(64px * var(--ls, 1));
+    overflow-wrap: anywhere;
+    font-size: calc(27px * var(--ls, 1));
     font-weight: 600;
-    line-height: 32px;
+    line-height: calc(32px * var(--ls, 1));
     color: #fff;
-  }
-
-  .stack .cur span {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
   }
 
   /* The live activity. The ring is a pair of half discs: each disc turns inside its half, and the

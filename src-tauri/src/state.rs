@@ -2,10 +2,43 @@
 //! activities feed in; the resolved state is emitted to the frontend and read by the cursor
 //! watcher for hit testing.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+
+/// The lyrics layout's size at rest, and the most the window allows (720 x 240 less the 10 px ears).
+/// The frontend sizes the layout for the track's longest lines and reports it with
+/// `island_set_lyrics_size`. Mirrors `lyricsFit.ts`.
+const LYRICS_MIN: (f64, f64) = (620.0, 224.0);
+const LYRICS_MAX: (f64, f64) = (700.0, 240.0);
+
+/// The lyrics layout's current size, as whole px: width in the high half, height in the low half.
+static LYRICS_SIZE: AtomicU64 = AtomicU64::new(pack(LYRICS_MIN));
+
+const fn pack((w, h): (f64, f64)) -> u64 {
+    ((w as u64) << 32) | h as u64
+}
+
+fn lyrics_size() -> (f64, f64) {
+    let packed = LYRICS_SIZE.load(Ordering::Relaxed);
+    ((packed >> 32) as f64, (packed & 0xFFFF_FFFF) as f64)
+}
+
+/// Sets the lyrics layout's size, held between the resting size and the window's limit. Returns
+/// the size kept.
+fn set_lyrics_size(w: f64, h: f64) -> (f64, f64) {
+    let clamp = |value: f64, min: f64, max: f64| {
+        if value.is_finite() { value.round().clamp(min, max) } else { min }
+    };
+    let size = (
+        clamp(w, LYRICS_MIN.0, LYRICS_MAX.0),
+        clamp(h, LYRICS_MIN.1, LYRICS_MAX.1),
+    );
+    LYRICS_SIZE.store(pack(size), Ordering::Relaxed);
+    size
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -48,7 +81,7 @@ impl IslandState {
             Self::Active => (200.0, 30.0),
             Self::Activity => (220.0, 30.0),
             Self::Expanded => (380.0, 192.0),
-            Self::Lyrics => (620.0, 224.0),
+            Self::Lyrics => lyrics_size(),
             Self::Hud => (260.0, 30.0),
             Self::Notification => (260.0, 30.0),
             Self::Battery => (260.0, 30.0),
@@ -245,6 +278,13 @@ pub fn commit(
 #[tauri::command]
 pub fn island_set_wide(app: AppHandle, island: State<'_, SharedIsland>, wide: bool) {
     commit(&app, &island, |machine| machine.set_wide(wide));
+}
+
+/// Tells the hit area how big the lyrics layout is, so a notch widened or lengthened for a long
+/// line is still hovered over its whole body. Held between 620 x 224 and 700 x 240.
+#[tauri::command]
+pub fn island_set_lyrics_size(w: f64, h: f64) {
+    set_lyrics_size(w, h);
 }
 
 #[cfg(test)]
@@ -630,9 +670,22 @@ mod tests {
     #[test]
     fn lyrics_pill_fits_the_window() {
         let (w, h) = IslandState::Lyrics.pill_size();
-        assert_eq!((w, h), (620.0, 224.0));
-        assert!(w <= 720.0, "lyrics pill is {w} px wide");
-        assert!(h <= 240.0, "lyrics pill is {h} px tall");
+        assert!((620.0..=700.0).contains(&w), "lyrics pill is {w} px wide");
+        assert!((224.0..=240.0).contains(&h), "lyrics pill is {h} px tall");
+        // The widest body plus the two 10 px ears is the window's width.
+        assert!(LYRICS_MAX.0 + 20.0 <= 720.0);
+        assert!(LYRICS_MAX.1 <= 240.0);
+    }
+
+    /// The size is shared, so this test sets it and puts the resting size back.
+    #[test]
+    fn lyrics_size_is_held_between_rest_and_the_window_limit() {
+        assert_eq!(set_lyrics_size(660.4, 230.6), (660.0, 231.0));
+        assert_eq!(IslandState::Lyrics.pill_size(), (660.0, 231.0));
+        assert_eq!(set_lyrics_size(9_999.0, 9_999.0), LYRICS_MAX);
+        assert_eq!(set_lyrics_size(1.0, -5.0), LYRICS_MIN);
+        assert_eq!(set_lyrics_size(f64::NAN, f64::INFINITY), LYRICS_MIN);
+        assert_eq!(IslandState::Lyrics.pill_size(), LYRICS_MIN);
     }
 
     #[test]

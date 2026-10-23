@@ -50,6 +50,7 @@ fn main() {
             modules::lyrics::lyrics_snapshot,
             modules::audio::audio_set_active,
             state::island_set_wide,
+            state::island_set_lyrics_size,
             modules::controls::controls_list,
             modules::controls::controls_set,
             modules::controls::controls_press,

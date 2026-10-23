@@ -26,7 +26,8 @@ number below comes from the code. If you change a number, change it here too.
 
 Body sizes are logical px. The ears (outside the body) do not count for hit-testing. Each pill's
 outline width is `w + 2 * ear`. The window is 720 x 240 (`tauri.conf.json` and `window.rs`), and the
-largest pill is the lyrics layout.
+largest pill is the lyrics layout: 620 x 224 at rest, and up to 700 x 240 for a track with long lines
+(section 3.3). 700 plus two 10 px ears is 720, so the window holds it.
 
 | State (`IslandState`) | Body w x h | Ear | Bottom radius | Defined in |
 | --- | --- | --- | --- | --- |
@@ -39,7 +40,7 @@ largest pill is the lyrics layout.
 | `calendar` (event reminder) | 260 x 30 | 10 | 15 | same |
 | `alert` (timer finished) | 320 x 64 | 10 | 24 | same |
 | `expanded` (panel) | 380 x 192 | 10 | 24 | same |
-| `lyrics` (wide panel) | 620 x 224 | 10 | 24 | same |
+| `lyrics` (wide panel) | 620 x 224 at rest, up to 700 x 240 | 10 | 24 | `state.rs` `pill_size` (between `LYRICS_MIN` and `LYRICS_MAX`), `Island.svelte` `SIZES` and `fitLyrics`, the size from `lib/lyricsFit.ts` |
 | `tucked` | 64 x 5 | 2.5 | 2.5 | same |
 | `hidden` | 0 x 0 | none | none | `state.rs` |
 
@@ -48,6 +49,10 @@ Rules:
 - `state.rs` `pill_size` (hit-testing and click-through) and `Island.svelte` `SIZES` (rendering) must
   match. The Rust tests `expanded_pill_fits_the_window`, `lyrics_pill_fits_the_window`,
   `activity_and_alert_fit_the_window` and `hud_pill_is_slim_and_fits_the_window` check the window fit.
+- The lyrics layout is the one size that changes with its content. `lib/lyricsFit.ts` picks the size for
+  each track, from all its lines, and `Island.svelte` reports it to Rust with `island_set_lyrics_size`, so
+  hit-testing follows the drawn body. `state.rs` holds it between 620 x 224 and 700 x 240
+  (`lyrics_size_is_held_between_rest_and_the_window_limit`).
 - The bottom radius is `min(h / 2, 24)`, from `Island.svelte` `islandPath(w, h, ear, radius, bleed)`.
 - The outline bleeds 16 px above the window top (`BLEED`), and the window clips at y=0.
 
@@ -119,22 +124,45 @@ The stopwatch with 2 laps fills the lower area with 1 px either side. The laps l
 its laps, up to the room left. With more laps the list takes the rest of the area (34 px here) and
 scrolls, so the box never overflows.
 
-### 3.3 The lyrics layout (620 x 224)
+### 3.3 The lyrics layout (620 x 224 at rest, up to 700 x 240)
 
 ```
 y   0 .............................
     14 px  safe top (.wide padding-top)
-    178 px body (.wide-body): left column and lyric stack, each centred
+    h - 46 px body (.wide-body): left column and lyric stack, each centred
+           (178 px at 224, 184 at 230, 194 at 240)
     8 px   gap
     16 px  pager row
     8 px   under the pager
-y 224 .............................
+y h .............................
 ```
 
-- Side inset is 16 px (`.wide` padding 0 16). The left column is 250 px wide, and the stack takes the
-  rest of the 588 px body.
-- The left column (art 88, gap 14, transport 68 = 170 px) is centred in the 178 px body: 4 px above and
-  below. The lyric stack (132 px) is centred: 23 px above and below.
+- Side inset is 16 px (`.wide` padding 0 16). The left column is 250 px wide. The lyric stack takes the
+  rest after the 20 px gap, so its text width is `w - 302` px: 318 at 620 and 398 at 700.
+- The left column is the title and artist block (`.now-wide .meta`, 88 px: a two-line title of 28 px
+  lines, an 8 px gap and the 24 px artist line), level with the 88 px art. Then a 10 px gap, the progress
+  row (14 px), a 10 px gap and the transport (52 px): 174 px in all, centred in the 178 px body, so 2 px
+  above and below at rest. The title is 24 / 28 at weight 600, two lines at most, and the artist is 17 / 24.
+  The block spans the art's 88 px with a one-line title as well.
+- The lyric stack (`.stack`) has the current line at 27 / 32 weight 600, in a box at least 64 px tall
+  (two rows), and each context line at 21 / 26, 40% white, in a box at least 26 px tall, with 8 px
+  gaps. Short lines give 132 px, centred: 23 px above and below.
+- Lines wrap whole. `overflow-wrap: anywhere` breaks a word longer than the column. Nothing is clipped,
+  and no ellipsis is drawn. `--ls` on `.content` scales the text, and it is 1 unless the fit needs less.
+
+**Fit (`src/lib/lyricsFit.ts`).** The size is worked out for the track from all its lines, so it stays
+still while the lines change. The steps are in this order, and each one is the smallest that works:
+
+1. Widen from 620 to 700 at 224 high, until every line shows whole as the current line or as a neighbour.
+2. At 700 wide, grow the height to the body the lines need (up to 240).
+3. Only then scale the text: 0.95, 0.9 and so on down to a floor of 0.7.
+
+A line's rows are counted with the measured width of its words at the stack's text width. Words wrap at
+spaces, and a longer word breaks by character. A current line needs `(max(2, rows) * 32 + (prev + next)
+* 26) * scale + 16` px of body, where each neighbour counts at least one row, and the pill is that plus
+46. The size is the largest of these over the track's lines. In the browser harness a 97-character line
+at 700 wide wrapped onto three rows, and the pill was 700 x 230, with the 96 px current box holding all
+three rows (`.cur` and its text the same height).
 
 ### 3.4 Compact pills (30 px tall, 64 for alert)
 
@@ -184,9 +212,9 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | 36 / 40 | 600 | Timer and pomodoro digits (`.digits`) |
 | 27 / 32 | 600 | Lyrics current line (`.stack .cur`, two lines max) |
 | 21 / 26 | 400 | Lyrics context lines (`.stack .ctx`, 40% white) |
-| 19 / 23 | 600 | Lyrics layout title (`.heading`, two lines max) |
+| 24 / 28 | 600 | Lyrics layout title (`.heading`, two lines max) |
 | 16 | 400 | Timer stepper symbols |
-| 15 / 18 | 400 | Lyrics layout artist |
+| 17 / 24 | 400 | Lyrics layout artist |
 | 14 / 17 | 600 | Panel title (`.title`), alert title |
 | 13 / 16 | 500 | Panel lyric line (`.lyric .line`) |
 | 13 | 600 | Activity digits (`.clock-slot`), tabular |
@@ -492,7 +520,7 @@ Row 16 px tall, 4 px gaps. Each dot is a 16 px hit area with a 5 px white dot at
 when current). The row is centred, with 8 px under it.
 
 ### Media progress line
-`MediaProgress.svelte` is one 14 px row under the artist, in the media text column of both the panel and the lyrics layout. The text column is centred beside the cover art, so the art still sets the row height and the page keeps the heights in section 3.2. The row is the elapsed time (11 px, tabular, 60% white), the bar, and the length. The bar is a 14 px hit area with a 3 px track at 16% white and a white fill scaled from its left edge. In the lyrics layout the text column is 88 px, the cover's height: a two-line title (46 px), the artist (18 px), this row (14 px) and two 3 px gaps make 84 px, so it still fits.
+`MediaProgress.svelte` is one 14 px row. In the panel it sits under the artist, in the media text column beside the cover art, so the art still sets the row height and the page keeps the heights in section 3.2. The row is the elapsed time (11 px, tabular, 60% white), the bar, and the length. The bar is a 14 px hit area with a 3 px track at 16% white and a white fill scaled from its left edge. In the lyrics layout it is a row of its own in the 250 px left column, below the title and art block and above the transport (section 3.3), so the column is 174 px tall.
 
 - The elapsed time is the last sampled position, extrapolated while a track plays (`positionAt` in `lib/lyrics.ts`), and clamped to the length. A timer ticks 4 times a second, and only while the panel shows the Media page and a track plays. Nothing ticks otherwise.
 - A click or a drag seeks (`media_seek`), and the bar shows the target until the next media update, or for 2 s if no update comes. The keyboard seeks 5 s with the arrow keys. The bar is `role="slider"` with `aria-valuenow`, `aria-valuemin`, `aria-valuemax` and an `aria-valuetext` of "elapsed of length". It takes a 2 px focus ring at 70% white, offset 2 px.
@@ -501,7 +529,7 @@ when current). The row is centred, with 8 px under it.
 - Only `transform` animates. The fill eases between ticks, and a drag has no transition. Reduced motion has no transition at all, so the fill jumps.
 
 ### Lyrics transport
-Three round buttons: skip 60 px, play 68 px, glyphs 36 px and 40 px, 12 px gap, centred under the art.
+Three round buttons: skip 44 px, play 52 px, glyphs 28 px and 32 px, 14 px gap, centred under the progress row in the left column (section 3.3).
 
 ## 8. Mistakes found in the audit, and the rule that prevents each
 
@@ -633,7 +661,11 @@ changes.
 - The calendar reminder pill and page were checked in the browser harness, which drives
   `calendar://show`, `calendar://update` and `island://state`. The reminder times themselves (a real
   event firing at its start) are checked in `tauri dev`, not here.
-- The media progress line, the calendar snooze strip, and the Settings form's length and reminder chips were
+- The lyrics layout (title block, progress row, transport, lyric stack and the fit) was measured in the
+  browser harness at rest and with a long line, and not in the Tauri window. A line too long for 700 x 240
+  even at the 0.7 floor does not fit: a 300-character line needs about eight rows there, and it overlaps
+  its neighbours rather than clipping. That is the limit of the rule, not a bug to hide.
+- The media progress line's seek, the calendar snooze strip, and the Settings form's length and reminder chips were
   not measured in the browser harness or in the Tauri window. Their sizes come from the code and this file, and
   the snooze strip's layout (a 102 px body, with the strip in the bottom 30 px) needs a check on a real screen.
 - The Hotkeys section has no harness check. Its conflict line depends on what other apps hold.
