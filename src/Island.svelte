@@ -198,9 +198,14 @@
   // BLEED extends each outline this many px above the window top. See islandPath.
   const BLEED = 16;
 
-  // The size of a shape. Only the lyrics layout changes, with the track (see lyricsBox).
-  function sizeOf(shape: Shown): { w: number; h: number; ear: number } {
-    return shape === "lyrics" ? { ...SIZES.lyrics, ...lyricsBox } : SIZES[shape];
+  // The size of a shape. Only the lyrics layout changes, with the track (see lyricsBox). A template
+  // expression re-runs only for the variables it names, not for ones read inside a function, so a
+  // caller that must follow a new size passes lyricsBox in as `box`.
+  function sizeOf(
+    shape: Shown,
+    box: { w: number; h: number } = lyricsBox,
+  ): { w: number; h: number; ear: number } {
+    return shape === "lyrics" ? { ...SIZES.lyrics, ...box } : SIZES[shape];
   }
 
   // `_box` is unused. Passing lyricsBox makes the lyrics shape's style follow a new size.
@@ -399,8 +404,8 @@
   </span>
 {/snippet}
 
-{#snippet outline(name: Shown, _box?: unknown)}
-  {@const { w, h, ear } = sizeOf(name)}
+{#snippet outline(name: Shown, box?: { w: number; h: number })}
+  {@const { w, h, ear } = sizeOf(name, box)}
   <svg
     class="outline"
     viewBox="0 {-BLEED} {w + 2 * ear} {h + BLEED}"
@@ -703,7 +708,7 @@
     <div class="frame" style={frameStyle("lyrics", shown, lyricsBox)}>
       {@render outline("lyrics", lyricsBox)}
       {#key $tint.id}
-        {@const { w, h, ear } = sizeOf("lyrics")}
+        {@const { w, h, ear } = sizeOf("lyrics", lyricsBox)}
         <svg
           class="outline"
           viewBox="0 {-BLEED} {w + 2 * ear} {h + BLEED}"
