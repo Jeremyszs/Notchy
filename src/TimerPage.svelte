@@ -233,6 +233,14 @@
     cursor: pointer;
   }
 
+  .tabs button:focus-visible,
+  .chip:focus-visible,
+  .pill:focus-visible,
+  .step:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.7);
+    outline-offset: 2px;
+  }
+
   .tabs button[aria-pressed="true"] {
     background: rgba(255, 255, 255, 0.2);
     color: #fff;

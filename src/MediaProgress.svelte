@@ -2,7 +2,7 @@
   // The media progress line: the elapsed time, a bar and the length. The elapsed time is extrapolated
   // from the last backend sample while a track plays, and the clock runs only while the panel shows
   // the media page. A click or drag on the bar seeks, and the arrow keys seek by SEEK_STEP_MS. The
-  // bar is hidden when the length is unknown.
+  // row stays blank at the same height when the length is unknown.
   import { onDestroy } from "svelte";
   import { mediaState, seekTo } from "./stores/media";
   import { islandState } from "./stores/island";
@@ -139,6 +139,8 @@
     </div>
     <span class="time">{formatClock(duration)}</span>
   </div>
+{:else}
+  <div class="progress ghost" aria-hidden="true"></div>
 {/if}
 
 <style>
@@ -153,6 +155,10 @@
     line-height: 14px;
     font-variant-numeric: tabular-nums;
     color: rgba(255, 255, 255, 0.6);
+  }
+
+  .ghost {
+    height: 14px;
   }
 
   .time {

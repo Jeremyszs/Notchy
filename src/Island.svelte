@@ -143,7 +143,7 @@
   $: lyricLine =
     $lyricsState.status === "synced" ? ($currentLine?.current ?? "") : "";
   $: sourceLine =
-    $lyricsState.status === "none" || $lyricsState.status === "plain"
+    $lyricsState.status === "none" || $lyricsState.status === "plain" || $lyricsState.status === "loading"
       ? $mediaState.source
       : "";
 
@@ -603,6 +603,7 @@
 
   <div
     class="shape alert"
+    inert={$islandState !== "alert"}
     class:on={$islandState === "alert"}
     style="{shapeStyle('alert', shown)}; --c: {alertColors.from}; --c2: {alertColors.to}"
     role="group"
@@ -630,6 +631,7 @@
 
   <div
     class="shape expanded"
+    inert={$islandState !== "expanded"}
     class:on={$islandState === "expanded"}
     style={shapeStyle("expanded", shown)}
     role="group"
@@ -696,6 +698,7 @@
 
   <div
     class="shape lyrics"
+    inert={$islandState !== "lyrics"}
     class:on={$islandState === "lyrics"}
     style={shapeStyle("lyrics", shown, lyricsBox)}
     role="group"
@@ -1403,7 +1406,7 @@
   .controls {
     display: flex;
     justify-content: center;
-    gap: 22px;
+    gap: 14px;
   }
 
   .controls button {
@@ -1417,6 +1420,22 @@
     background: transparent;
     color: #fff;
     cursor: pointer;
+    transition: transform 120ms ease, opacity 120ms ease;
+  }
+
+  .controls button.play {
+    width: 40px;
+    height: 40px;
+  }
+
+  .controls button:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.7);
+    outline-offset: 2px;
+  }
+
+  .controls button:active {
+    transform: scale(0.94);
+    opacity: 0.7;
   }
 
   .controls button:hover {
@@ -1424,9 +1443,14 @@
   }
 
   .controls svg {
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     fill: currentColor;
+  }
+
+  .controls button.play svg {
+    width: 25px;
+    height: 25px;
   }
 
   /* The lyrics layout's transport sits under the progress bar, centred in the left column. Play is a
@@ -1838,6 +1862,14 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .controls button {
+      transition: opacity 120ms ease;
+    }
+
+    .controls button:active {
+      transform: none;
+    }
+
     .island,
     .shape,
     .frame,

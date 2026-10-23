@@ -68,8 +68,8 @@ Use these values. Other values appear only where a control's own size requires t
 | tight | 4 | row gaps in the timer, tile label gap, pager dot gap |
 | small | 6 | timer row gap, network row inner gap, the word and its dots |
 | standard | 8 | panel page gap, pill gaps, slider stack gap, the gap above the pager |
-| medium | 12 | controls grid gap, transport gap in media, activity side inset |
-| safe top | 14 | top of every expanded or lyrics panel (`.panel`, `.wide`) |
+| medium | 12 | controls grid gap, activity side inset |
+| safe top | 14 | top of every expanded or lyrics panel (`.panel`, `.wide`), media transport gap |
 | side | 16 | side inset of the expanded and lyrics panels |
 | pager | 16 + 8 | pager row height, then the space under it |
 
@@ -105,7 +105,7 @@ Measured in the shipped build (gap above / gap below the content block, px):
 
 | Page | Above | Below | Content height |
 | --- | --- | --- | --- |
-| Media (art, title, lyric line, transport) | 4 | 4 | 138 |
+| Media (art, title, lyric line, transport) | 1 | 1 | 144 |
 | Controls (2 sliders, 6 tiles) | 5 | 5 | 136 |
 | Timer, countdown (idle, running, paused, done) | 5 | 5 | 106 |
 | Timer, stopwatch (idle, running, paused, 0 laps) | 20 | 20 | 76 |
@@ -114,6 +114,8 @@ Measured in the shipped build (gap above / gap below the content block, px):
 | Timer, pomodoro (focus, break, paused, done) | 9 | 9 | 98 |
 | Wi-Fi and Bluetooth sub-views | header on top edge, footer on bottom edge | | 146 |
 | Calendar (month grid and notes) | 3 | 3 | 140 |
+
+The Media content height is 72 + 8 + 16 + 8 + 40 = 144 px, leaving 1 px above and below in the 146 px page box.
 
 The timer rows in this table are measured against the lower area (116 px, top at y 30), below the
 docked selector. The selector itself is measured at y 14, 24 px tall, x 94.8 from the panel's left
@@ -345,7 +347,7 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Equaliser bars (live) | 70 ms | ease-out per 30 Hz frame | transform |
 | Timer ring sweep | 1 s | linear | transform on each half disc |
 | Paused digits | 320 ms | ease | opacity |
-| Press feedback on tiles | 120 ms | ease | transform scale 0.94, opacity 0.7 |
+| Press feedback on tiles and media transport | 120 ms | ease | transform scale 0.94, opacity 0.7 |
 | Armed lock tile | | | transform scale 1.1, outline 2 px |
 | Spinner and pulse | 800 ms linear; 1200 ms ease-in-out | | transform, opacity |
 | Settings month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform and opacity. Reduced motion: a 150 ms fade, no slide |
@@ -538,11 +540,13 @@ when current). The row is centred, with 8 px under it.
 - The elapsed time is the last sampled position, extrapolated while a track plays (`positionAt` in `lib/lyrics.ts`), and clamped to the length. A timer ticks 4 times a second, and only while the panel shows the Media page and a track plays. Nothing ticks otherwise.
 - A click or a drag seeks (`media_seek`), and the bar shows the target until the next media update, or for 2 s if no update comes. The keyboard seeks 5 s with the arrow keys. The bar is `role="slider"` with `aria-valuenow`, `aria-valuemin`, `aria-valuemax` and an `aria-valuetext` of "elapsed of length". It takes a 2 px focus ring at 70% white, offset 2 px.
 - A drag keeps its pointer captured, so leaving the bar does not lose it. A drag that starts on the bar does not turn the page: `swipeStart` skips it, as it skips sliders.
-- The row is hidden when the length is unknown (zero, a live stream or no session), so nothing shows a bar that cannot seek.
+- The row is blank when the length is unknown (zero, a live stream or no session), but keeps its 14 px height so the art and transport stay in place. The blank row is hidden from screen readers, takes no focus and cannot seek.
 - Only `transform` animates. The fill eases between ticks, and a drag has no transition. Reduced motion has no transition at all, so the fill jumps.
 
 ### Lyrics transport
-Three round buttons: skip 44 px, play 52 px, glyphs 28 px and 32 px, 14 px gap, centred under the progress row in the left column (section 3.3).
+Three round buttons: skip 44 px, play 52 px, glyphs 28 px and 32 px, 14 px gap, centred under the progress row in the left column (section 3.3). The plain Media panel uses skip 34 px and play 40 px, with 22 px and 25 px glyphs and the same 14 px gap.
+
+Both layouts use a 2 px focus ring at 70% white, offset 2 px. Press feedback is scale 0.94 and opacity 0.7 over 120 ms ease, animating only transform and opacity. Reduced motion keeps the opacity feedback without scale. The plain panel shows "Playing from <source>" while lyrics load, or when lyrics are plain or unavailable; synced lyrics replace it with the current line.
 
 ## 8. Mistakes found in the audit, and the rule that prevents each
 
@@ -578,7 +582,7 @@ Three round buttons: skip 44 px, play 52 px, glyphs 28 px and 32 px, 14 px gap, 
 - Under reduced motion: shapes and pages change by fade only (150 ms) with no transform, the equaliser
   bars are static, the HUD bar, the battery glyph, the media progress fill and the ring jump instead of gliding, the timer digits crossfade over
   150 ms, the ripple is hidden, the alert glow sits at 35%, the lyric line and stack do not rise, the
-  spinner pulses instead of turning, and the tile press does not scale. The timer's mode change is a
+  spinner pulses instead of turning, and tile and media transport presses do not scale. The timer's mode change is a
   150 ms opacity crossfade in both settings, because it is a fade and carries no motion.
 - Focus rings: a 2 px outline at 70% white in most places. The pager dots use 1 px at 60%. Never remove
   an outline without a replacement.
@@ -587,7 +591,7 @@ Three round buttons: skip 44 px, play 52 px, glyphs 28 px and 32 px, 14 px gap, 
   against black.
 - The panels, the alert and the lyrics layout are `role="group"` with a label, and the alert text is a
   `role="status"` region. The activity and HUD pills are `aria-hidden`, because the panel and the alert
-  already say the same thing. Pages that are not shown are `inert`, so they take no focus or taps.
+  already say the same thing. Pages and expanded, lyrics and alert shapes that are not shown are `inert`, so they take no focus or taps.
 
 ## 10. Settings that change the notch
 
