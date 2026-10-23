@@ -241,7 +241,8 @@
 </div>
 
 <style>
-  /* Fills the controls page. Header, footer and a scrolling list share the 150px height. */
+  /* Fills the controls page. Header and footer sit on the page box's top and bottom edges, and the
+     scrolling list takes the 146 px between them. */
   .network {
     display: flex;
     flex-direction: column;
@@ -465,8 +466,9 @@
     margin: 0;
   }
 
+  /* An empty list centres in the body, between the header and the footer. */
   .empty {
-    margin-top: 12px;
+    margin: auto;
     text-align: center;
   }
 

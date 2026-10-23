@@ -26,7 +26,7 @@
     typeof matchMedia === "function" &&
     matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // The page is 380 wide and about 150 tall. Two sliders and seven tiles fit on one page.
+  // The page is 380 wide and 146 tall. Two sliders and seven tiles fit on one page.
   // Anything past that is left out, not wrapped, because a second tile row does not fit.
   const MAX_SLIDERS = 2;
   const MAX_TILES = 7;
@@ -215,11 +215,13 @@
     color: #fff;
   }
 
-  /* The grid fades out while a sub-view is open. Inert keeps it out of focus and taps. */
+  /* The grid fades out while a sub-view is open. Inert keeps it out of focus and taps. The sliders
+     and the tiles are centred as one block, with 12 px between them. */
   .main {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 12px;
     height: 100%;
     transition: opacity 160ms ease;
   }

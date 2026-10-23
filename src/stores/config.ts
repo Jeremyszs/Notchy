@@ -13,6 +13,7 @@ export interface Config {
   font: FontId;
   hud: boolean;
   timerSound: boolean;
+  idleClock: boolean;
   focusMinutes: number;
   shortBreakMinutes: number;
   longBreakMinutes: number;
@@ -37,6 +38,7 @@ export const DEFAULT_CONFIG: Config = {
   font: "inter",
   hud: true,
   timerSound: true,
+  idleClock: true,
   focusMinutes: 25,
   shortBreakMinutes: 5,
   longBreakMinutes: 15,

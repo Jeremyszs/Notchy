@@ -38,8 +38,8 @@ impl IslandState {
             Self::Idle => (120.0, 30.0),
             Self::Active => (200.0, 30.0),
             Self::Activity => (220.0, 30.0),
-            Self::Expanded => (380.0, 184.0),
-            Self::Lyrics => (620.0, 214.0),
+            Self::Expanded => (380.0, 192.0),
+            Self::Lyrics => (620.0, 224.0),
             Self::Hud => (260.0, 30.0),
             Self::Alert => (320.0, 64.0),
             Self::Tucked => (64.0, 5.0),
@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn lyrics_pill_fits_the_window() {
         let (w, h) = IslandState::Lyrics.pill_size();
-        assert_eq!((w, h), (620.0, 214.0));
+        assert_eq!((w, h), (620.0, 224.0));
         assert!(w <= 720.0, "lyrics pill is {w} px wide");
         assert!(h <= 240.0, "lyrics pill is {h} px tall");
     }

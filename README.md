@@ -2,11 +2,13 @@
 
 A Dynamic Island-style notch overlay for Windows. Tauri 2 (Rust) + Svelte 5 + TypeScript.
 
-- **Idle**: small black pill at the top center of the primary monitor.
+> **UI work:** read [DESIGN.md](DESIGN.md) before you touch the notch, its pages, sizes or motion. It holds the size table, the layout and centring rules, the type and colour values, and the checklist for UI changes.
+
+- **Idle**: small black pill at the top center of the primary monitor, with the time (HH:MM, dim) in the middle. Settings turns the time off (`idleClock`).
 - **Active** (media playing): the pill widens, showing album art and equalizer bars. The bars follow the system's audio output while this pill is on screen (see Audio levels below), and animate on a timer otherwise.
 - **Expanded** (hover): two pages, switched by the dots, a wheel turn, or a horizontal swipe. The **Media** page shows album art, title, artist, the current synced lyric line (or "Playing from <app>" when there are no lyrics), and previous / play-pause / next controls. The **Controls** page has volume and brightness sliders and toggle tiles (Wi-Fi, Bluetooth, airplane, mute, keep awake, lock), driven by the controls backend. Opening the panel picks the page: the last one if it was left within 8 s, otherwise Media when something is playing, else Controls. The page list lives in `src/stores/pages.ts`. On the Media page, when the track has synced lyrics, hovering widens the panel into a lyrics layout: circular album art, large transport controls centred under it, and three lyric lines (the current one up to two lines) over a tint taken from the album art.
 - **HUD** (the system volume, mute or panel brightness changed): the pill widens into a slim bar for about 1.6 s, then gives way again. Each new change restarts that time. Hover still wins, and a fullscreen app still hides the notch (see Volume and brightness HUD below).
-- **Activity** (a timer is running, paused, or finished and waiting to be dismissed): the compact pill shows a ring on the left and the time on the right, in place of the media title and bars. Hover expands it as usual.
+- **Activity** (a timer is running, paused, or finished and waiting to be dismissed): the compact pill shows a ring on the left and the time on the right, with the word in the middle (Timer, Stopwatch, Focus, Break, Long break, Paused or Done). A pomodoro also shows one dot per focus session. It takes the place of the media title and bars. Hover expands it as usual.
 - **Alert** (a countdown just reached zero): a card for about 4 s, with the copy, **+1 min** and **Dismiss**. It holds even under the pointer, so its buttons stay where they are.
 - **Tucked** (a window sits under the notch): shrinks to a thin sliver. Hover it for 250 ms to open it. A covering window also tucks a live activity.
 - **Hidden** (a fullscreen app owns the monitor): fully invisible and non-interactive.
@@ -88,7 +90,7 @@ Ids: `volume`, `mute`, `mic`, `brightness`, `wifi`, `bluetooth`, `airplane`, `lo
 
 The tray icon opens **Settings** on left-click (or from its menu). Settings is a second window, built on first use and hidden, not closed, when you close it. The tray menu also has **Quit Notchy**, the only way to exit the app.
 
-Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, the volume and brightness HUD, confirm before locking, launch at login, and the timer's sound and pomodoro lengths. Every change saves at once and applies live.
+Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, show the time when idle, the volume and brightness HUD, confirm before locking, launch at login, and the timer's sound and pomodoro lengths. Every change saves at once and applies live.
 
 The file is `config.json` in the app config directory (`%APPDATA%\com.notchy.app\config.json`). `config.rs` owns it: a missing or corrupt file gives the defaults, and saves are written through a temp file and renamed. A leading UTF-8 byte order mark (which Windows PowerShell writes) is skipped on load, so a hand-edited file keeps its settings. Launch at login is the `Notchy` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 
@@ -110,7 +112,7 @@ Apple's SF is **not bundled**. Its licence limits use to Apple platforms, so Not
 
 ## Known limits (v0.1)
 
-- Pill sizes are defined in both `state.rs` (hit-testing) and `Island.svelte` (rendering). Keep them in sync. The window is 720 x 240 (`tauri.conf.json` and `window.rs`), which holds the largest pill, the 620 x 214 lyrics layout.
+- Pill sizes are defined in both `state.rs` (hit-testing) and `Island.svelte` (rendering). Keep them in sync. The window is 720 x 240 (`tauri.conf.json` and `window.rs`), which holds the largest pill, the 620 x 224 lyrics layout. DESIGN.md has the full table.
 - Album art is read once per track; an app that publishes its thumbnail late may show the placeholder.
 - Only the primary monitor is supported.
 - The volume and brightness HUD follows the default output and the built-in panel. External monitors show no brightness HUD, and the native Windows OSD still appears alongside it.

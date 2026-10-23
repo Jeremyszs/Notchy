@@ -257,6 +257,29 @@ export function phaseLabel(view: TimerView): string {
   return "Focus";
 }
 
+/**
+ * The word in the middle of the compact activity pill. A finished or paused run says so, and
+ * otherwise the pill names the mode, or the part of the pomodoro cycle that is running.
+ */
+export function activityLabel(view: TimerView): string {
+  if (view.status === "done") return "Done";
+  if (view.status === "paused") return "Paused";
+  if (view.mode === "stopwatch") return "Stopwatch";
+  if (view.mode === "timer") return "Timer";
+  if (view.phase === "break") return "Break";
+  if (view.phase === "long") return "Long break";
+  return "Focus";
+}
+
+/**
+ * The session dots in the activity pill: one per focus session in the cycle, filled once that
+ * session is done. A timer or a stopwatch has no cycle, so it has no dots.
+ */
+export function cycleDots(view: TimerView): { total: number; done: number } {
+  if (view.mode !== "pomodoro") return { total: 0, done: 0 };
+  return { total: view.pomodoro.of, done: view.pomodoro.completed };
+}
+
 /** The minutes in a countdown, rounded, for the stepper and the presets. */
 export function minutesOf(totalMs: number): number {
   return Math.round(totalMs / 60_000);

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "tauri": "tauri",
-    "test": "node --experimental-strip-types --test src/settings/rows.test.ts src/lib/hud.test.ts src/lib/timer.test.ts src/lib/roll.test.ts"
+    "test": "node --experimental-strip-types --test src/settings/rows.test.ts src/lib/hud.test.ts src/lib/timer.test.ts src/lib/roll.test.ts src/lib/clock.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

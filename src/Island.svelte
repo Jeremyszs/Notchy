@@ -17,9 +17,11 @@
   import { refresh as refreshControls } from "./stores/controls";
   import { hud } from "./stores/hud";
   import { hudFill, hudIcon, hudLabel, type HudIcon } from "./lib/hud";
-  import { alertCopy, palette, ringRotations } from "./lib/timer";
+  import { activityLabel, alertCopy, cycleDots, palette, ringRotations } from "./lib/timer";
   import { lastFinish, timerState, timerView, addTime, dismissTimer } from "./stores/timer";
+  import { config } from "./stores/config";
   import ControlsPage from "./ControlsPage.svelte";
+  import IdleClock from "./IdleClock.svelte";
   import RollingClock from "./RollingClock.svelte";
   import TimerPage from "./TimerPage.svelte";
   import { fade, fly } from "svelte/transition";
@@ -31,7 +33,9 @@
   // Body sizes in logical px. Must match IslandState::pill_size in src-tauri/src/state.rs,
   // which drives the click-through hit area. The ears sit outside the body and are not hit-tested.
   // The tucked ear is 2.5 because its bottom radius is 2.5, and the ear must end above that curve.
-  // The expanded and lyrics heights include the pager row, and must stay under the 240 px window.
+  // The expanded and lyrics heights include the top safe zone and the pager row, and must stay under
+  // the 240 px window. Each page's usable height is the height less 46 px: 14 px safe zone, 8 px
+  // gap, 16 px pager, 8 px under the pager. See DESIGN.md, "Layout system".
   // The lyrics body is wider than the panel and is taller for its enlarged lines.
   const SIZES: Record<Shown, { w: number; h: number; ear: number }> = {
     idle: { w: 120, h: 30, ear: 10 },
@@ -39,8 +43,8 @@
     activity: { w: 220, h: 30, ear: 10 },
     hud: { w: 260, h: 30, ear: 10 },
     alert: { w: 320, h: 64, ear: 10 },
-    expanded: { w: 380, h: 184, ear: 10 },
-    lyrics: { w: 620, h: 214, ear: 10 },
+    expanded: { w: 380, h: 192, ear: 10 },
+    lyrics: { w: 620, h: 224, ear: 10 },
     tucked: { w: 64, h: 5, ear: 2.5 },
   };
 
@@ -77,6 +81,9 @@
   // The live activity is a running, paused or finished timer. It takes the compact pill from media.
   // Its ring and digits come from the timer store, which extrapolates between backend updates.
   $: timer = $timerView;
+  // The activity pill's word and its pomodoro dots. Both come from the same view as the digits.
+  $: timerWord = activityLabel(timer);
+  $: timerDots = cycleDots(timer);
   // The alert card shows the newest countdown that ended, until its owner clears it.
   $: alertText = $lastFinish ? alertCopy($lastFinish.data, $timerState.snapshot) : null;
   $: alertColors = $lastFinish
@@ -330,6 +337,11 @@
   >
     <div class="frame" style={frameStyle("idle", shown)}>
       {@render outline("idle")}
+      {#if $config.idleClock}
+        <div class="content idle-row">
+          <IdleClock />
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -371,14 +383,26 @@
         class:paused={timer.status === "paused"}
         style="--c: {timer.palette.from}; --c2: {timer.palette.to}"
       >
-        {#if timer.mode === "stopwatch"}
-          <svg class="stopwatch-glyph" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="13.5" r="7.5" />
-            <path d="M12 13.5V10M9.5 3h5" />
-          </svg>
-        {:else}
-          {@render ring(timer.fraction, timer.palette.from, timer.palette.to)}
-        {/if}
+        <div class="lead">
+          {#if timer.mode === "stopwatch"}
+            <svg class="stopwatch-glyph" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="13.5" r="7.5" />
+              <path d="M12 13.5V10M9.5 3h5" />
+            </svg>
+          {:else}
+            {@render ring(timer.fraction, timer.palette.from, timer.palette.to)}
+          {/if}
+        </div>
+        <div class="mid">
+          <span class="word">{timerWord}</span>
+          {#if timerDots.total > 0}
+            <span class="cycle" aria-label="{timerDots.done} of {timerDots.total} focus sessions done">
+              {#each Array(timerDots.total) as _, n (n)}
+                <span class="cdot" class:on={n < timerDots.done}></span>
+              {/each}
+            </span>
+          {/if}
+        </div>
         <div class="clock-slot" use:beat={beatKey}>
           <RollingClock text={timer.label} />
         </div>
@@ -789,6 +813,13 @@
 
   /* The HUD row. The bar is a track with a fill that scales from its left edge, so a key repeat
      glides to each new level. Only transform moves. The track's radius clips the fill's ends. */
+  /* The idle pill's clock: dim, centred, digits that do not shift. Off in Settings means no row. */
+  .idle-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   .hud-row {
     display: flex;
     align-items: center;
@@ -868,19 +899,24 @@
   }
 
   /* Pages overlap in one box. The shown page sits in place. Each other page waits PAGE_SHIFT
-     to a side with opacity 0, so a page change slides one in and the other out. */
+     to a side with opacity 0, so a page change slides one in and the other out. The 8 px bottom
+     margin keeps every page's content clear of the pager row. */
   .pages {
     position: relative;
     flex: 1;
     min-height: 0;
+    margin-bottom: 8px;
   }
 
+  /* Each page's content is centred in the page box, so the space above and below it is equal.
+     A page never pins its controls to the bottom edge. */
   .page {
     position: absolute;
     inset: 0;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 8px;
     transform: translateX(var(--x, 0px));
     opacity: 0;
     transition:
@@ -897,14 +933,14 @@
     pointer-events: none;
   }
 
-  /* Dots take 16px hit areas. The dot itself is 5px. */
+  /* Dots take 16px hit areas. The dot itself is 5px. The row sits 8 px above the bottom edge. */
   .pager {
     display: flex;
     flex: none;
     justify-content: center;
     gap: 4px;
     height: 16px;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
   }
 
   .dot {
@@ -1059,13 +1095,14 @@
   }
 
   /* Lyrics layout: art, title and transport on the left, three lines on the right. The pager
-     stays centred at the bottom. The body is 214 px tall, less 12 px of top padding and the
-     20 px pager row, which leaves 182 px for the columns. */
+     stays centred at the bottom. The body is 224 px tall, less the 14 px safe zone, the 8 px gap
+     above the pager and the 24 px pager row, which leaves 178 px for the columns. The side
+     insets match the expanded panel's 16 px. */
   .wide {
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    padding: 12px 14px 0;
+    padding: 14px 16px 0;
   }
 
   .wide-body {
@@ -1073,10 +1110,12 @@
     flex: 1;
     gap: 20px;
     min-height: 0;
+    margin-bottom: 8px;
   }
 
   /* The left column is 250 px: art and text (250 less 88 px art and 12 px gap), then the
-     centred transport row of 212 px, which fits with room to spare. */
+     transport row of 68 px, 170 px in all. The column is centred in the 178 px body, so it has
+     4 px above and below. */
   .side {
     display: flex;
     flex: none;
@@ -1165,12 +1204,21 @@
   /* The live activity. The ring is a pair of half discs: each disc turns inside its half, and the
      clip shows only its own semicircle. Only transform changes, once a second, so the browser
      runs the sweep on the compositor. Reduced motion jumps to each new angle. */
+  /* Three columns: the ring on the left, the word and session dots in the middle, the digits on
+     the right. The outer columns are 52 px, which holds the longest clock (1:02:33, about 50 px).
+     They are the same width, so the middle is centred and 92 px wide: enough for "Long break" (59 px),
+     a 6 px gap and four dots (25 px). */
   .activity-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) 52px;
+    align-items: center;
+    padding: 0 12px;
+  }
+
+  .activity-row .lead {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 0 12px;
+    justify-self: start;
   }
 
   .activity-row .ring {
@@ -1178,9 +1226,50 @@
     height: 16px;
   }
 
+  .activity-row .mid {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  /* The word fades at the right edge if it is too long for the middle column. */
+  .activity-row .word {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 16px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .activity-row .cycle {
+    display: flex;
+    flex: none;
+    gap: 3px;
+  }
+
+  /* An unfilled session is the accent at low opacity. Only opacity animates. */
+  .activity-row .cdot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--c);
+    opacity: 0.25;
+    transition: opacity 220ms ease;
+  }
+
+  .activity-row .cdot.on {
+    opacity: 1;
+  }
+
   .activity-row .clock-slot {
     display: flex;
     align-items: center;
+    justify-self: end;
     font-size: 13px;
     font-weight: 600;
     transition: opacity 300ms ease;

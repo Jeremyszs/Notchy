@@ -71,6 +71,8 @@ pub struct Config {
     pub hud: bool,
     /// Play the system beep once when a timer or a pomodoro phase runs out.
     pub timer_sound: bool,
+    /// Show the time (HH:MM, dim) in the idle pill.
+    pub idle_clock: bool,
     /// Pomodoro focus length, in minutes. Held to FOCUS_MINUTES.
     pub focus_minutes: u32,
     /// Pomodoro short break length, in minutes. Held to SHORT_BREAK_MINUTES.
@@ -90,6 +92,7 @@ impl Default for Config {
             font: DEFAULT_FONT.to_string(),
             hud: true,
             timer_sound: true,
+            idle_clock: true,
             focus_minutes: FOCUS_MINUTES.0,
             short_break_minutes: SHORT_BREAK_MINUTES.0,
             long_break_minutes: LONG_BREAK_MINUTES.0,
@@ -450,6 +453,7 @@ mod tests {
         assert!(json.contains("\"font\":\"inter\""));
         assert!(json.contains("\"hud\":true"));
         assert!(json.contains("\"timerSound\":true"));
+        assert!(json.contains("\"idleClock\":true"));
         assert!(json.contains("\"focusMinutes\":25"));
         assert!(json.contains("\"shortBreakMinutes\":5"));
         assert!(json.contains("\"longBreakMinutes\":15"));
@@ -511,6 +515,14 @@ mod tests {
         assert!(config.hud);
         let off: Config = serde_json::from_str(r#"{"hud": false}"#).unwrap();
         assert!(!off.hud);
+    }
+
+    #[test]
+    fn file_without_an_idle_clock_setting_shows_the_time() {
+        let config: Config = serde_json::from_str(r#"{"lyrics": false}"#).unwrap();
+        assert!(config.idle_clock);
+        let off: Config = serde_json::from_str(r#"{"idleClock": false}"#).unwrap();
+        assert!(!off.idle_clock);
     }
 
     #[test]

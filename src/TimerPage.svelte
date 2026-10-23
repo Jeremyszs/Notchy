@@ -3,6 +3,7 @@
   // with laps, and a pomodoro cycle. The backend owns the clock. This page only shows it and sends
   // the buttons' commands.
   import { get } from "svelte/store";
+  import { fade } from "svelte/transition";
   import {
     addTime,
     dismissTimer,
@@ -35,6 +36,8 @@
     { id: "pomodoro", label: "Pomodoro" },
   ];
   const ONE_MINUTE_MS = 60_000;
+  // A mode change crossfades the content below the selector. Opacity only, in every motion setting.
+  const MODE_FADE = { duration: 150 };
 
   $: view = $timerView;
   // A run in progress, paused or waiting to be dismissed, locks the mode and the goal.
@@ -76,6 +79,7 @@
 </script>
 
 <div class="timer" style="--c: {view.palette.from}; --c2: {view.palette.to}">
+  <!-- Docked: the selector is the first row of the page, and no mode or state moves it. -->
   <div class="tabs" role="group" aria-label="Clock">
     {#each MODES as item (item.id)}
       <button
@@ -89,113 +93,125 @@
     {/each}
   </div>
 
-  {#if view.mode === "stopwatch"}
-    <div class="digits" class:paused={view.status === "paused"} use:live></div>
-  {:else}
-    <div class="digits" class:paused={view.status === "paused"}>
-      <RollingClock text={view.label} />
-    </div>
-  {/if}
+  <!-- Everything below the selector gets the rest of the page box. The body for the current mode
+       is absolutely placed in that area and centred in it, so the outgoing and incoming bodies
+       crossfade over the same space and neither one changes the layout. -->
+  <div class="lower">
+    {#key view.mode}
+      <div class="body" in:fade={MODE_FADE} out:fade={MODE_FADE}>
+        {#if view.mode === "stopwatch"}
+          <div class="digits" class:paused={view.status === "paused"} use:live></div>
+        {:else}
+          <div class="digits" class:paused={view.status === "paused"}>
+            <RollingClock text={view.label} />
+          </div>
+        {/if}
 
-  {#if view.mode === "pomodoro"}
-    <div class="cycle">
-      <span>{phaseLabel(view)}</span>
-      <span class="dots" aria-label="{view.pomodoro.completed} of {view.pomodoro.of} focus sessions done">
-        {#each Array(view.pomodoro.of) as _, n (n)}
-          <span class="dot" class:on={n < view.pomodoro.completed}></span>
-        {/each}
-      </span>
-    </div>
-  {/if}
+        {#if view.mode === "pomodoro"}
+          <div class="cycle">
+            <span>{phaseLabel(view)}</span>
+            <span class="dots" aria-label="{view.pomodoro.completed} of {view.pomodoro.of} focus sessions done">
+              {#each Array(view.pomodoro.of) as _, n (n)}
+                <span class="dot" class:on={n < view.pomodoro.completed}></span>
+              {/each}
+            </span>
+          </div>
+        {/if}
 
-  {#if view.mode === "timer"}
-    <div class="presets" role="group" aria-label="Presets">
-      {#each TIMER_PRESETS_MIN as preset (preset)}
-        <button
-          type="button"
-          class="chip"
-          class:on={!busy && minutes === preset}
-          disabled={busy}
-          onclick={() => setMinutes(preset)}
-        >
-          {preset}
-        </button>
-      {/each}
-    </div>
-  {/if}
+        {#if view.mode === "timer"}
+          <div class="presets" role="group" aria-label="Presets">
+            {#each TIMER_PRESETS_MIN as preset (preset)}
+              <button
+                type="button"
+                class="chip"
+                class:on={!busy && minutes === preset}
+                disabled={busy}
+                onclick={() => setMinutes(preset)}
+              >
+                {preset}
+              </button>
+            {/each}
+          </div>
+        {/if}
 
-  <div class="actions">
-    {#if view.status === "done"}
-      <button type="button" class="pill" onclick={() => addTime(ONE_MINUTE_MS)}>+1 min</button>
-      <button type="button" class="pill strong" onclick={dismissTimer}>Dismiss</button>
-    {:else if view.status === "running"}
-      <button type="button" class="pill" onclick={pauseTimer}>Pause</button>
-      {#if view.mode === "stopwatch"}
-        <button
-          type="button"
-          class="pill"
-          disabled={view.laps.length >= MAX_LAPS}
-          onclick={lapTimer}
-        >
-          Lap
-        </button>
-      {/if}
-      <button type="button" class="pill quiet" onclick={resetTimer}>Reset</button>
-    {:else if view.status === "paused"}
-      <button type="button" class="pill strong" onclick={resumeTimer}>Resume</button>
-      <button type="button" class="pill quiet" onclick={resetTimer}>Reset</button>
-    {:else if view.mode === "timer"}
-      <div class="stepper">
-        <button
-          type="button"
-          class="step"
-          aria-label="One minute less"
-          disabled={minutes <= MIN_TIMER_MINUTES}
-          onclick={() => setMinutes(minutes - 1)}
-        >
-          −
-        </button>
-        <span class="minutes">{minutes} min</span>
-        <button
-          type="button"
-          class="step"
-          aria-label="One minute more"
-          disabled={minutes >= MAX_TIMER_MINUTES}
-          onclick={() => setMinutes(minutes + 1)}
-        >
-          +
-        </button>
+        <div class="actions">
+          {#if view.status === "done"}
+            <button type="button" class="pill" onclick={() => addTime(ONE_MINUTE_MS)}>+1 min</button>
+            <button type="button" class="pill strong" onclick={dismissTimer}>Dismiss</button>
+          {:else if view.status === "running"}
+            <button type="button" class="pill" onclick={pauseTimer}>Pause</button>
+            {#if view.mode === "stopwatch"}
+              <button
+                type="button"
+                class="pill"
+                disabled={view.laps.length >= MAX_LAPS}
+                onclick={lapTimer}
+              >
+                Lap
+              </button>
+            {/if}
+            <button type="button" class="pill quiet" onclick={resetTimer}>Reset</button>
+          {:else if view.status === "paused"}
+            <button type="button" class="pill strong" onclick={resumeTimer}>Resume</button>
+            <button type="button" class="pill quiet" onclick={resetTimer}>Reset</button>
+          {:else if view.mode === "timer"}
+            <div class="stepper">
+              <button
+                type="button"
+                class="step"
+                aria-label="One minute less"
+                disabled={minutes <= MIN_TIMER_MINUTES}
+                onclick={() => setMinutes(minutes - 1)}
+              >
+                −
+              </button>
+              <span class="minutes">{minutes} min</span>
+              <button
+                type="button"
+                class="step"
+                aria-label="One minute more"
+                disabled={minutes >= MAX_TIMER_MINUTES}
+                onclick={() => setMinutes(minutes + 1)}
+              >
+                +
+              </button>
+            </div>
+            <button type="button" class="pill strong" onclick={startTimer}>Start</button>
+          {:else}
+            <button type="button" class="pill strong" onclick={startTimer}>Start</button>
+          {/if}
+        </div>
+
+        {#if view.mode === "stopwatch" && view.laps.length > 0}
+          <ol class="laps" aria-label="Laps">
+            {#each view.laps.slice().reverse() as lap, i (view.laps.length - i)}
+              <li>
+                <span class="name">Lap {view.laps.length - i}</span>
+                <span>{formatStopwatch(lap.totalMs)}</span>
+                <span class="split">+{formatStopwatch(lap.splitMs)}</span>
+              </li>
+            {/each}
+          </ol>
+        {/if}
       </div>
-      <button type="button" class="pill strong" onclick={startTimer}>Start</button>
-    {:else}
-      <button type="button" class="pill strong" onclick={startTimer}>Start</button>
-    {/if}
+    {/key}
   </div>
-
-  {#if view.mode === "stopwatch" && view.laps.length > 0}
-    <ol class="laps" aria-label="Laps">
-      {#each view.laps.slice().reverse() as lap, i (view.laps.length - i)}
-        <li>
-          <span class="name">Lap {view.laps.length - i}</span>
-          <span>{formatStopwatch(lap.totalMs)}</span>
-          <span class="split">+{formatStopwatch(lap.splitMs)}</span>
-        </li>
-      {/each}
-    </ol>
-  {/if}
 </div>
 
 <style>
+  /* The selector is docked at the top of the page box. Only the area below it adapts to the mode,
+     and the rows in that area are centred in it, so the gap above equals the gap below. */
   .timer {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     min-height: 0;
     height: 100%;
     color: #fff;
   }
 
   .tabs {
+    flex: none;
     display: flex;
     align-self: center;
     gap: 2px;
@@ -225,6 +241,28 @@
   .tabs button:disabled {
     cursor: default;
     opacity: 0.35;
+  }
+
+  /* The area below the selector: whatever height the page box leaves. */
+  .lower {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  /* One mode's content, filling the area and centring its rows in it. */
+  .body {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    min-height: 0;
+  }
+
+  .body > * {
+    flex: none;
   }
 
   /* Fixed height, so a change of digits or mode never moves the rows below. */
@@ -260,16 +298,18 @@
     gap: 5px;
   }
 
+  /* An unfilled session is the accent at low opacity. Only opacity animates. */
   .dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-    transition: background-color 220ms ease;
+    background: var(--c);
+    opacity: 0.25;
+    transition: opacity 220ms ease;
   }
 
   .dot.on {
-    background: var(--c);
+    opacity: 1;
   }
 
   .presets {
@@ -372,10 +412,12 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Room for about two and a half laps. The list scrolls for the rest, newest first. */
+  /* The laps take the height the rows above leave. Rows are 16 px, and a longer list scrolls
+     inside this box, newest first. Below the rows the list is only as tall as its laps, so a short
+     list stays centred with the other rows. */
   .laps {
-    flex: none;
-    height: 44px;
+    flex: 0 1 auto;
+    min-height: 0;
     margin: 0;
     padding: 0 4px 0 0;
     overflow-y: auto;

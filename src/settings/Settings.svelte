@@ -34,6 +34,7 @@
   let launchAtLogin = DEFAULT_CONFIG.launchAtLogin;
   let font: FontId = DEFAULT_CONFIG.font;
   let timerSound = DEFAULT_CONFIG.timerSound;
+  let idleClock = DEFAULT_CONFIG.idleClock;
   let focusMinutes = DEFAULT_CONFIG.focusMinutes;
   let shortBreakMinutes = DEFAULT_CONFIG.shortBreakMinutes;
   let longBreakMinutes = DEFAULT_CONFIG.longBreakMinutes;
@@ -116,6 +117,7 @@
       font,
       hud: showHud,
       timerSound,
+      idleClock,
       focusMinutes,
       shortBreakMinutes,
       longBreakMinutes,
@@ -184,6 +186,7 @@
     launchAtLogin = settings.launchAtLogin;
     font = settings.font;
     timerSound = settings.timerSound;
+    idleClock = settings.idleClock;
     focusMinutes = settings.focusMinutes;
     shortBreakMinutes = settings.shortBreakMinutes;
     longBreakMinutes = settings.longBreakMinutes;
@@ -311,6 +314,17 @@
             label="Volume and brightness HUD"
             onchange={(on) => {
               showHud = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Show the time when idle</span></span>
+          <Switch
+            checked={idleClock}
+            label="Show the time when idle"
+            onchange={(on) => {
+              idleClock = on;
               scheduleSave();
             }}
           />

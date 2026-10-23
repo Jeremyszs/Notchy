@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  activityLabel,
   alertCopy,
+  cycleDots,
   formatClock,
   formatElapsed,
   formatStopwatch,
@@ -194,4 +196,21 @@ test("the pomodoro line names the session in focus", () => {
   assert.equal(phaseLabel(focus), "Focus 2 of 4");
   const shortBreak = viewAt(snap({ mode: "pomodoro", phase: "break" }), 0, 0);
   assert.equal(phaseLabel(shortBreak), "Short break");
+});
+
+test("the activity pill names the mode, the paused or finished state, or the pomodoro part", () => {
+  assert.equal(activityLabel(viewAt(snap({ mode: "timer", status: "running", running: true }), 0, 0)), "Timer");
+  assert.equal(activityLabel(viewAt(snap({ mode: "stopwatch", status: "running", running: true }), 0, 0)), "Stopwatch");
+  assert.equal(activityLabel(viewAt(snap({ status: "paused" }), 0, 0)), "Paused");
+  assert.equal(activityLabel(viewAt(snap({ status: "done" }), 0, 0)), "Done");
+  assert.equal(activityLabel(viewAt(snap({ mode: "pomodoro", phase: "focus", status: "running", running: true }), 0, 0)), "Focus");
+  assert.equal(activityLabel(viewAt(snap({ mode: "pomodoro", phase: "break", status: "running", running: true }), 0, 0)), "Break");
+  assert.equal(activityLabel(viewAt(snap({ mode: "pomodoro", phase: "long", status: "running", running: true }), 0, 0)), "Long break");
+});
+
+test("the pomodoro dots show one dot per focus session, filled as they are completed", () => {
+  const cycle = viewAt(snap({ mode: "pomodoro", pomodoro: { session: 3, of: 4, completed: 2 } }), 0, 0);
+  assert.deepEqual(cycleDots(cycle), { total: 4, done: 2 });
+  assert.deepEqual(cycleDots(viewAt(snap({ mode: "timer" }), 0, 0)), { total: 0, done: 0 });
+  assert.deepEqual(cycleDots(viewAt(snap({ mode: "stopwatch" }), 0, 0)), { total: 0, done: 0 });
 });
