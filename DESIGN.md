@@ -567,6 +567,7 @@ Three round buttons: skip 44 px, play 52 px, glyphs 28 px and 32 px, 14 px gap, 
 | 17 | A width measured before its web font loaded used the fallback font, and the cache kept it (measured: 757.5 px against 673.1 px for Playfair). | Measure only a loaded face. A face that is loading is not cached, and the fit runs again when it loads. |
 | 18 | Rows were counted as the width divided by the column, rounded up. A long CJK or unbroken word lost a row (11 of 700 lines in the harness). | Break a piece that is wider than a row character by character, as the browser wraps it. |
 | 19 | An exact fit left 0 px of slack, so one pixel of difference could change a row. | Count the columns 4 px narrower than the notch (`WRAP_SAFETY_PX`). |
+| 20 | The lyrics outline and tint layers stayed at 620 x 224 when the notch grew to fit a track (measured: viewBox 640 x 240 where 720 x 246 was due), so the album art and the progress row stuck out past the visible border. The size was read inside `sizeOf()`, and a Svelte template expression re-runs only for the variables it names, not for ones read inside a function. | Pass the size in as an argument: `sizeOf(shape, box)`, called with `lyricsBox` from the shape style, the outline snippet and the tint `{@const}`. Any new layer drawn from the lyrics size must do the same. Check that every `svg.outline` viewBox equals the fitted width + 20 and height + 16. |
 
 ## 9. Accessibility and reduced motion
 
