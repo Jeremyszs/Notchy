@@ -7,8 +7,8 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::iter;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, Once, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -179,21 +179,73 @@ pub fn save(path: &Path, config: &Config) -> io::Result<()> {
     fs::rename(&temp, path)
 }
 
+/// What the Run entry should become. Decided by `plan_run_entry`, which is pure so the rules are
+/// tested without touching the registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunEntry {
+    /// Point the entry at this exe.
+    Write(PathBuf),
+    /// Delete the entry.
+    Remove,
+    /// Leave the entry as it is, for this reason.
+    Skip(&'static str),
+}
+
+/// Whether `exe` is a build output that must never be registered: its parent directory is named
+/// `debug`, or it sits under a `target\debug` path. Case-insensitive, like Windows paths.
+pub fn is_dev_exe(exe: &Path) -> bool {
+    let parts: Vec<String> = exe
+        .components()
+        .filter_map(|part| match part {
+            Component::Normal(name) => Some(name.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect();
+    let parent_is_debug = parts.len() >= 2 && parts[parts.len() - 2] == "debug";
+    parent_is_debug
+        || parts
+            .windows(2)
+            .any(|pair| pair[0] == "target" && pair[1] == "debug")
+}
+
+/// Decides the Run entry for a setting. Debug builds never touch it (a debug exe needs the Vite
+/// dev server and opens a console, so it must not start at sign-in), and a release build only
+/// registers an exe that `is_dev_exe` accepts. Turning the setting off removes the entry.
+pub fn plan_run_entry(enabled: bool, debug_build: bool, exe: Option<&Path>) -> RunEntry {
+    if debug_build {
+        return RunEntry::Skip("debug build: launch at login is not changed");
+    }
+    if !enabled {
+        return RunEntry::Remove;
+    }
+    match exe {
+        None => RunEntry::Skip("could not find the running exe"),
+        Some(exe) if is_dev_exe(exe) => RunEntry::Skip("refusing to register a debug build exe"),
+        Some(exe) => RunEntry::Write(exe.to_path_buf()),
+    }
+}
+
 /// Writes or removes the per-user Run entry that starts Notchy at sign-in.
 fn write_run_entry(enabled: bool) -> Result<(), String> {
-    // Built before the key is opened, so a failure here cannot leak the handle.
-    let data = if enabled {
-        let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-        let command = format!("\"{}\"", exe.display());
-        Some(
-            command
-                .encode_utf16()
-                .chain(iter::once(0))
-                .flat_map(u16::to_le_bytes)
-                .collect::<Vec<u8>>(),
-        )
-    } else {
-        None
+    let exe = std::env::current_exe().ok();
+    let data = match plan_run_entry(enabled, cfg!(debug_assertions), exe.as_deref()) {
+        RunEntry::Write(exe) => {
+            // Built before the key is opened, so a failure here cannot leak the handle.
+            let command = format!("\"{}\"", exe.display());
+            Some(
+                command
+                    .encode_utf16()
+                    .chain(iter::once(0))
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Vec<u8>>(),
+            )
+        }
+        RunEntry::Remove => None,
+        RunEntry::Skip(reason) => {
+            static LOGGED: Once = Once::new();
+            LOGGED.call_once(|| eprintln!("notchy: {reason}"));
+            return Ok(());
+        }
     };
 
     let mut key = HKEY(std::ptr::null_mut());
@@ -443,6 +495,81 @@ mod tests {
         save(&path, &Config::default()).unwrap();
         assert_eq!(load(&path), Config::default());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn release_exe_is_registered_when_enabled() {
+        let exe = Path::new(r"C:\Program Files\Notchy\notchy.exe");
+        assert_eq!(
+            plan_run_entry(true, false, Some(exe)),
+            RunEntry::Write(exe.to_path_buf())
+        );
+        let built = Path::new(r"C:\claude-october-2026\notchy\src-tauri\target\release\notchy.exe");
+        assert_eq!(
+            plan_run_entry(true, false, Some(built)),
+            RunEntry::Write(built.to_path_buf())
+        );
+    }
+
+    #[test]
+    fn disabling_removes_the_entry() {
+        let exe = Path::new(r"C:\Program Files\Notchy\notchy.exe");
+        assert_eq!(plan_run_entry(false, false, Some(exe)), RunEntry::Remove);
+        assert_eq!(plan_run_entry(false, false, None), RunEntry::Remove);
+    }
+
+    #[test]
+    fn debug_build_never_touches_the_entry() {
+        let exe = Path::new(r"C:\Program Files\Notchy\notchy.exe");
+        assert!(matches!(
+            plan_run_entry(true, true, Some(exe)),
+            RunEntry::Skip(_)
+        ));
+        assert!(matches!(
+            plan_run_entry(false, true, Some(exe)),
+            RunEntry::Skip(_)
+        ));
+        assert!(matches!(
+            plan_run_entry(false, true, None),
+            RunEntry::Skip(_)
+        ));
+    }
+
+    #[test]
+    fn debug_exe_is_refused_even_in_a_release_build() {
+        let scratch = Path::new(
+            r"C:\Users\me\AppData\Local\Temp\claude\x\scratchpad\app-target\debug\notchy.exe",
+        );
+        assert!(matches!(
+            plan_run_entry(true, false, Some(scratch)),
+            RunEntry::Skip(_)
+        ));
+        let target = Path::new(r"C:\repo\src-tauri\target\debug\notchy.exe");
+        assert!(matches!(
+            plan_run_entry(true, false, Some(target)),
+            RunEntry::Skip(_)
+        ));
+    }
+
+    #[test]
+    fn missing_exe_path_is_not_written() {
+        assert!(matches!(
+            plan_run_entry(true, false, None),
+            RunEntry::Skip(_)
+        ));
+    }
+
+    #[test]
+    fn dev_exe_detection_is_case_insensitive_and_exact() {
+        assert!(is_dev_exe(Path::new(r"D:\x\Debug\notchy.exe")));
+        assert!(is_dev_exe(Path::new(r"D:\x\TARGET\DEBUG\notchy.exe")));
+        assert!(is_dev_exe(Path::new(r"D:\x\target\debug\deps\notchy.exe")));
+        assert!(!is_dev_exe(Path::new(r"C:\Users\me\debugging\notchy.exe")));
+        assert!(!is_dev_exe(Path::new(
+            r"C:\Program Files\Notchy\notchy.exe"
+        )));
+        assert!(!is_dev_exe(Path::new(r"C:\repo\target\release\notchy.exe")));
+        assert!(!is_dev_exe(Path::new(r"C:\debug-tools\notchy\notchy.exe")));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 
 mod config;
 mod modules;
+mod single_instance;
 mod state;
 mod tray;
 mod window;
@@ -13,6 +14,11 @@ use state::{IslandStateMachine, SharedIsland};
 use tauri::Manager;
 
 fn main() {
+    // A second copy exits here, silently, before it creates a window or a tray icon. The guard
+    // lives until main returns, so the name stays claimed for the whole run.
+    let Some(_instance) = single_instance::claim(single_instance::MUTEX_NAME) else {
+        return;
+    };
     // Before Tauri or any module touches COM. See `init_process_security`.
     modules::controls::init_process_security();
     tauri::Builder::default()
