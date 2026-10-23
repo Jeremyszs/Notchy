@@ -18,6 +18,14 @@ export interface Config {
   shortBreakMinutes: number;
   longBreakMinutes: number;
   notifications: NotificationSettings;
+  battery: BatterySettings;
+}
+
+// Mirrors Battery in config.rs.
+export interface BatterySettings {
+  enabled: boolean;
+  chargeAlerts: boolean;
+  lowBatteryAlerts: boolean;
 }
 
 // Mirrors Notifications in config.rs. Apps seen so far are not here: they live in their own file.
@@ -51,6 +59,7 @@ export const DEFAULT_CONFIG: Config = {
   shortBreakMinutes: 5,
   longBreakMinutes: 15,
   notifications: { enabled: true, deniedApps: [] },
+  battery: { enabled: true, chargeAlerts: true, lowBatteryAlerts: true },
 };
 
 const store = writable<Config>(DEFAULT_CONFIG);

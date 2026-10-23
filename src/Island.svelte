@@ -18,6 +18,8 @@
   import { hud } from "./stores/hud";
   import { notice } from "./stores/notifications";
   import { initialOf } from "./lib/notifications";
+  import { battery } from "./stores/battery";
+  import { batteryColor, batteryLabel, glyphFill, hasBolt, percentText } from "./lib/battery";
   import { hudFill, hudIcon, hudLabel, type HudIcon } from "./lib/hud";
   import { activityLabel, alertCopy, cycleDots, palette, ringRotations } from "./lib/timer";
   import { lastFinish, timerState, timerView, addTime, dismissTimer } from "./stores/timer";
@@ -45,6 +47,7 @@
     activity: { w: 220, h: 30, ear: 10 },
     hud: { w: 260, h: 30, ear: 10 },
     notification: { w: 260, h: 30, ear: 10 },
+    battery: { w: 260, h: 30, ear: 10 },
     alert: { w: 320, h: 64, ear: 10 },
     expanded: { w: 380, h: 192, ear: 10 },
     lyrics: { w: 620, h: 224, ear: 10 },
@@ -59,6 +62,15 @@
 
   // The notification pill shows the newest notice from the queue, and its app's initial as the badge.
   $: noticeBadge = initialOf($notice.app);
+
+  // The battery pill shows the newest event: its glyph fill and colour, and what happened. The key
+  // changes with each event, so its text fades in place.
+  $: batteryFill = glyphFill($battery.percent);
+  $: batteryTint = batteryColor($battery.kind);
+  $: batteryWords = batteryLabel($battery.kind);
+  $: batteryLevel = percentText($battery.percent);
+  $: batteryBolt = hasBolt($battery.kind);
+  $: batteryKey = `${$battery.kind}|${$battery.percent}`;
 
   // Pages slide this far sideways as they change. Reduced motion keeps only the fade.
   const PAGE_SHIFT = 16;
@@ -453,6 +465,43 @@
           {#key $notice.seq}
             <p class="notice-text" in:fade={{ duration: 200 }} out:fade={{ duration: 120 }}>
               <span class="notice-title">{$notice.title}</span>{#if $notice.body}{" "}<span class="notice-body">{$notice.body}</span>{/if}
+            </p>
+          {/key}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="shape battery"
+    class:on={$islandState === "battery"}
+    style="{shapeStyle('battery', shown)}; --c: {batteryTint}"
+  >
+    <div class="frame" style={frameStyle("battery", shown)}>
+      {@render outline("battery")}
+      <div class="content battery-row">
+        <svg class="battery-glyph" viewBox="0 0 25 14" aria-hidden="true">
+          <rect class="glyph-track" x="3" y="4" width="16" height="6" rx="1.5" />
+          <rect
+            class="glyph-fill"
+            x="3"
+            y="4"
+            width="16"
+            height="6"
+            rx="1.5"
+            style="transform: scaleX({batteryFill})"
+          />
+          <rect class="glyph-body" x="0.75" y="1.75" width="20.5" height="10.5" rx="3" />
+          <rect class="glyph-nub" x="22.5" y="4.5" width="2" height="5" rx="1" />
+          {#if batteryBolt}
+            <path class="glyph-bolt" d="M11.6 4.5 9 7.4h1.9l-.7 2.1L13 6.6h-1.9z" />
+          {/if}
+        </svg>
+        <div class="battery-copy" role="status">
+          {#key batteryKey}
+            <p class="battery-text" in:fade={{ duration: 200 }} out:fade={{ duration: 120 }}>
+              <span class="battery-label">{batteryWords}</span>
+              <span class="battery-level">{batteryLevel}</span>
             </p>
           {/key}
         </div>
@@ -971,6 +1020,86 @@
 
   .notice-body {
     font-weight: 400;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* The battery pill. The glyph and its words are one group, centred in the pill, so the group's
+     centre is the pill's centre. The glyph fill scales from its left edge and takes the kind's
+     colour. The pill takes no clicks, as the notification pill does. */
+  .shape.battery.on {
+    pointer-events: none;
+  }
+
+  .battery-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .battery-glyph {
+    flex: none;
+    width: 25px;
+    height: 14px;
+    overflow: visible;
+  }
+
+  .battery-glyph .glyph-track {
+    fill: rgba(255, 255, 255, 0.16);
+  }
+
+  .battery-glyph .glyph-fill {
+    fill: var(--c);
+    transform-box: fill-box;
+    transform-origin: left center;
+    transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .battery-glyph .glyph-body {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.85);
+    stroke-width: 1.5;
+  }
+
+  .battery-glyph .glyph-nub {
+    fill: rgba(255, 255, 255, 0.85);
+  }
+
+  /* The bolt is white with a thin black keyline, so it reads over the fill and over the track. */
+  .battery-glyph .glyph-bolt {
+    fill: #fff;
+    stroke: #000;
+    stroke-width: 0.8;
+    stroke-linejoin: round;
+    paint-order: stroke;
+  }
+
+  /* The text lines sit in one grid cell, so an outgoing line fades over the incoming one. */
+  .battery-copy {
+    display: grid;
+    min-width: 0;
+  }
+
+  .battery-text {
+    grid-area: 1 / 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+  }
+
+  .battery-label {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .battery-level {
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
     color: rgba(255, 255, 255, 0.6);
   }
 
@@ -1556,7 +1685,8 @@
     }
 
     /* The bar still shows the level, but it jumps to it rather than gliding. */
-    .hud-fill {
+    .hud-fill,
+    .battery-glyph .glyph-fill {
       transition: none;
     }
 

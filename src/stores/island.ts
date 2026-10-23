@@ -11,6 +11,7 @@ export type IslandState =
   | "tucked"
   | "hud"
   | "notification"
+  | "battery"
   | "alert"
   | "hidden";
 

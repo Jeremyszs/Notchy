@@ -35,6 +35,7 @@ largest pill is the lyrics layout.
 | `activity` (timer) | 220 x 30 | 10 | 15 | same |
 | `hud` | 260 x 30 | 10 | 15 | same |
 | `notification` (another app's toast) | 260 x 30 | 10 | 15 | same |
+| `battery` (charger, full, low battery) | 260 x 30 | 10 | 15 | same |
 | `alert` (timer finished) | 320 x 64 | 10 | 24 | same |
 | `expanded` (panel) | 380 x 192 | 10 | 24 | same |
 | `lyrics` (wide panel) | 620 x 224 | 10 | 24 | same |
@@ -144,6 +145,11 @@ y 224 .............................
   an empty 16 px that mirrors the badge, so the text centre is the pill centre (measured: both at the
   window centre). The text is one line, 12 px, with the title at 600 and 90% white and the body at
   400 and 60% white. A long line fades out with an ellipsis, and a title-only notice has no body span.
+- **Battery pill.** The glyph and its words are one flex row, centred as a group (`justify-content:
+  center`, 8 px gap, 12 px side padding). The group's centre is the pill's centre, so the gaps on
+  each side are equal whatever the words are. Measured: group centre within 0.01 px of the pill
+  centre, left and right gaps equal (66.1 px for "On battery 82%"), glyph and text centred
+  vertically (0 px). The text never overflows.
 - **The middle is never empty.** See section 8, rule 1.
 
 ### 3.5 Measuring a layout
@@ -183,6 +189,7 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | 13 / 16 | 500 | Panel lyric line (`.lyric .line`) |
 | 13 | 600 | Activity digits (`.clock-slot`), tabular |
 | 12 / 16 | 500 | Active pill title (`.active-title`) |
+| 12 / 16 | 600 and 400 | Battery pill: the word (600, 90% white) and the level (400, 60% white, tabular) |
 | 12 | 600 | Pills and chips, HUD value, stepper value, idle clock, section heading |
 | 12 | 400 | Panel artist (60% white), network names |
 | 11 / 14 | 400 | Notices, alert sub-line, lyric source line |
@@ -217,6 +224,10 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Media (active pill) | white bars and title | | no accent: the artwork is the colour |
 | Media (lyrics tint) | hue from the album art, saturation 45 to 75%, lightness 28 to 40% (`src/lib/tint.ts`) | | fades to `#000` by 85% of the height |
 | Notification (pill) | `#0A84FF` | `#64D2FF` | blue. The badge only: the text stays white |
+| Battery, charger and full | `#30D158` | | solid glyph fill (no gradient). Green is the charger |
+| Battery, on battery | `#FFFFFF` | | solid glyph fill, neutral |
+| Battery low, 20% | `#FF9F0A` | | solid glyph fill, amber (Apple orange) |
+| Battery low, 10% | `#FF453A` | | solid glyph fill, red (Apple red) |
 | Volume (HUD) | `#7DD3FC` | `#FFFFFF` | ice |
 | Brightness (HUD and icon) | `#FFD166` | `#FFF3C4` | amber |
 | Mute slash | `#FF6B6B` | | HUD and quick-control icons |
@@ -245,6 +256,8 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Lyrics stack change | 220 ms, rises 10 px; old block fades 180 ms | | transform and opacity |
 | Lyrics tint crossfade | 400 ms | | opacity |
 | HUD bar | 120 ms | ease-out | transform scaleX |
+| Battery glyph fill | 320 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform scaleX, origin left |
+| Battery text change | 200 ms in, 120 ms out | ease | opacity (keyed on the event) |
 | HUD icon | 160 ms in, 110 ms out | | opacity |
 | Notification text change | 200 ms in, 120 ms out (fade, and the outgoing text stays in the same cell) | ease | opacity |
 | Timer digit roll | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)`, 150 ms crossfade under reduced motion | transform and opacity |
@@ -323,6 +336,20 @@ glyph is 18 px.
 - Stepper: 28 px round buttons with a 6 px gap, value 56 px wide, tabular.
 - Mode tabs: a 24 px tall track with 2 px padding, each button 20 px tall with 10 px side padding.
 
+### Battery pill
+A 260 x 30 pill, shown as `IslandState::Battery` (`state.rs`). The glyph is an SVG on a 25 x 14
+viewBox: a 1.5 px outline, a track at 16% white, the fill, a 2 px nub, and a bolt on the charger.
+The fill is a `transform: scaleX(level)` on a rect with `transform-box: fill-box` and origin left, so
+a change glides and nothing animates `width`. The bolt is white with a thin black keyline, so it reads
+over the fill and over the track. Charging and full charge show the bolt. Low battery and unplugged do
+not.
+
+Precedence: a battery pill is a transient. It sits under the HUD and the alert, and over a
+notification. A plug event is short and physical, so it is not held back behind a message. While it is
+up, the notification keeps its own timer, so a message can expire unseen under it, as it does under the
+HUD. Hover and fullscreen hide it as they hide the HUD. Only one pill is on screen. A newer event
+replaces it and restarts its time. Charger and full pills hold 3 s, and low-battery warnings hold 5 s.
+
 ### Pager
 Row 16 px tall, 4 px gaps. Each dot is a 16 px hit area with a 5 px white dot at 35% opacity (100%
 when current). The row is centred, with 8 px under it.
@@ -355,7 +382,7 @@ Three round buttons: skip 60 px, play 68 px, glyphs 36 px and 40 px, 12 px gap, 
   The JavaScript check is read once when the module loads, so a change while the app runs needs a
   restart. Keep both in step when you add a motion.
 - Under reduced motion: shapes and pages change by fade only (150 ms) with no transform, the equaliser
-  bars are static, the HUD bar and the ring jump instead of gliding, the timer digits crossfade over
+  bars are static, the HUD bar, the battery glyph and the ring jump instead of gliding, the timer digits crossfade over
   150 ms, the ripple is hidden, the alert glow sits at 35%, the lyric line and stack do not rise, the
   spinner pulses instead of turning, and the tile press does not scale. The timer's mode change is a
   150 ms opacity crossfade in both settings, because it is a fade and carries no motion.
@@ -383,6 +410,7 @@ has a row in `src/settings/Settings.svelte`.
 | `timerSound` | on | Beep when a countdown ends. |
 | `notifications` (`enabled`, `deniedApps`) | on, no apps denied | Shows other apps' Windows toasts in the notification pill. Settings > Notifications lists the apps and turns each on or off. |
 | `idleClock` | on | Shows HH:MM, dim, in the idle pill. |
+| `battery` (`enabled`, `chargeAlerts`, `lowBatteryAlerts`) | on, on, on | Shows the battery pill for the charger, full charge and low-battery warnings. Settings > Battery. A PC with no battery shows nothing. |
 | `focusMinutes`, `shortBreakMinutes`, `longBreakMinutes` | 25, 5, 15 | Pomodoro lengths. |
 
 Decision on the idle clock: the idle pill is the only moment the notch is not doing something, so
@@ -447,5 +475,7 @@ changes.
 - The notification pill takes the cursor like the HUD does, because the window hit-tests every pill
   by its size. Its own element has `pointer-events: none`, and nothing is wired to it, so a click
   does nothing. The pill never shows an icon, only the app's initial.
+- The battery pill was checked in the browser harness, which drives the `battery://show` and
+  `island://state` events. A real plug or unplug on the Tauri window is not checked.
 - Timer digits are measured by line box, not by ink. A font with a tall or short cap height can look
   a pixel off-centre. Adjust `line-height` on the element, not the padding, if that happens.

@@ -8,6 +8,8 @@
   import { FONT_OPTIONS, fontStack, type FontId } from "../lib/font";
   import { accessCopy, isAllowed, setAllowed } from "../lib/notifications";
   import { notificationsStatus } from "../stores/notifications";
+  import { batteryStatus } from "../stores/battery";
+  import { statusCopy } from "../lib/battery";
   import { moveRow, ordered, type Row } from "./rows";
   import ReorderList from "./ReorderList.svelte";
   import Switch from "./Switch.svelte";
@@ -42,6 +44,9 @@
   let longBreakMinutes = DEFAULT_CONFIG.longBreakMinutes;
   let notifyOn = DEFAULT_CONFIG.notifications.enabled;
   let deniedApps: string[] = [];
+  let batteryOn = DEFAULT_CONFIG.battery.enabled;
+  let batteryCharge = DEFAULT_CONFIG.battery.chargeAlerts;
+  let batteryLow = DEFAULT_CONFIG.battery.lowBatteryAlerts;
   let confirmingReset = false;
   let status = "";
   let version = "";
@@ -126,6 +131,7 @@
       shortBreakMinutes,
       longBreakMinutes,
       notifications: { enabled: notifyOn, deniedApps },
+      battery: { enabled: batteryOn, chargeAlerts: batteryCharge, lowBatteryAlerts: batteryLow },
     };
   }
 
@@ -203,6 +209,9 @@
     longBreakMinutes = settings.longBreakMinutes;
     notifyOn = settings.notifications.enabled;
     deniedApps = settings.notifications.deniedApps;
+    batteryOn = settings.battery.enabled;
+    batteryCharge = settings.battery.chargeAlerts;
+    batteryLow = settings.battery.lowBatteryAlerts;
   }
 
   function resetDefaults(): void {
@@ -405,6 +414,49 @@
         </ul>
       {/if}
       <p class="note">Notification text is read on this PC and never saved.</p>
+    </section>
+
+    <section aria-labelledby="battery-title">
+      <h2 id="battery-title">Battery</h2>
+      <ul class="group">
+        <li class="row">
+          <span class="text"><span class="label">Show battery alerts</span></span>
+          <Switch
+            checked={batteryOn}
+            label="Show battery alerts"
+            disabled={$batteryStatus === null}
+            onchange={(on) => {
+              batteryOn = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Charger and full charge</span></span>
+          <Switch
+            checked={batteryCharge}
+            label="Charger and full charge"
+            disabled={!batteryOn || !$batteryStatus}
+            onchange={(on) => {
+              batteryCharge = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Low battery warnings</span></span>
+          <Switch
+            checked={batteryLow}
+            label="Low battery warnings"
+            disabled={!batteryOn || !$batteryStatus}
+            onchange={(on) => {
+              batteryLow = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+      </ul>
+      <p class="note" role="status">{statusCopy($batteryStatus)}</p>
     </section>
 
     <section aria-labelledby="timer-title">

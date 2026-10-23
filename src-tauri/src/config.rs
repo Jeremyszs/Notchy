@@ -82,6 +82,31 @@ pub struct Config {
     pub long_break_minutes: u32,
     /// Other apps' toast notifications, shown in the island.
     pub notifications: Notifications,
+    /// Charger and battery-level pills in the island.
+    pub battery: Battery,
+}
+
+/// The battery feature's settings. Mirrors `battery` in src/stores/config.ts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Battery {
+    /// Battery alerts. On by default. Off, nothing is shown, though the status line in Settings
+    /// still reads the battery.
+    pub enabled: bool,
+    /// Show a pill when the charger is plugged in or out, and when the battery is full.
+    pub charge_alerts: bool,
+    /// Show a warning at 20% and at 10% while on battery.
+    pub low_battery_alerts: bool,
+}
+
+impl Default for Battery {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            charge_alerts: true,
+            low_battery_alerts: true,
+        }
+    }
 }
 
 /// The notification feature's settings. Mirrors `notifications` in src/stores/config.ts.
@@ -135,6 +160,7 @@ impl Default for Config {
             short_break_minutes: SHORT_BREAK_MINUTES.0,
             long_break_minutes: LONG_BREAK_MINUTES.0,
             notifications: Notifications::default(),
+            battery: Battery::default(),
         }
     }
 }
@@ -222,6 +248,13 @@ pub fn hud_enabled(app: &AppHandle) -> bool {
 pub fn notifications_enabled(app: &AppHandle) -> bool {
     app.try_state::<SharedConfig>()
         .is_none_or(|config| lock(&config).notifications.enabled)
+}
+
+/// The battery alert settings. The defaults when no config is managed yet.
+pub fn battery(app: &AppHandle) -> Battery {
+    app.try_state::<SharedConfig>()
+        .map(|config| lock(&config).battery)
+        .unwrap_or_default()
 }
 
 /// The app ids whose notifications are ignored. Empty when no config is managed yet.
@@ -514,6 +547,28 @@ mod tests {
         assert!(json.contains("\"shortBreakMinutes\":5"));
         assert!(json.contains("\"longBreakMinutes\":15"));
         assert!(json.contains("\"notifications\":{\"enabled\":true,\"deniedApps\":[]}"));
+        assert!(json.contains(
+            "\"battery\":{\"enabled\":true,\"chargeAlerts\":true,\"lowBatteryAlerts\":true}"
+        ));
+    }
+
+    /// Files written before battery alerts existed have no such key. They get it on, with both
+    /// kinds of alert on, and the rest of their settings are kept.
+    #[test]
+    fn file_without_battery_settings_turns_them_on() {
+        let config: Config = serde_json::from_str(r#"{"lyrics": false}"#).unwrap();
+        assert_eq!(config.sanitize().battery, Battery::default());
+
+        let partial: Config =
+            serde_json::from_str(r#"{"battery": {"lowBatteryAlerts": false}}"#).unwrap();
+        assert_eq!(
+            partial.battery,
+            Battery {
+                enabled: true,
+                charge_alerts: true,
+                low_battery_alerts: false,
+            }
+        );
     }
 
     /// Files written before notifications existed have no such key. They get it on, with nothing

@@ -6,6 +6,7 @@
 //! main.rs.
 
 pub mod audio;
+pub mod battery;
 pub mod context;
 pub mod controls;
 pub mod hud;
@@ -36,11 +37,12 @@ pub fn start_all(app: &AppHandle) {
         app: app.clone(),
         island: app.state::<SharedIsland>().inner().clone(),
     };
-    let modules: [&dyn Module; 6] = [
+    let modules: [&dyn Module; 7] = [
         &media::MediaModule,
         &lyrics::LyricsModule,
         &context::ContextModule,
         &hud::HudModule,
+        &battery::BatteryModule,
         &notifications::NotificationsModule,
         &timer::TimerModule,
     ];

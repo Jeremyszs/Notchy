@@ -26,6 +26,9 @@ pub enum IslandState {
     /// Another app's toast notification, shown for a few seconds. A transient like the HUD. Its
     /// content travels on `notifications://show`; this state only says it is on screen.
     Notification,
+    /// A charger plugged in or out, a full charge, or a low battery. A transient like the HUD, shown
+    /// above a notification. Its content travels on `battery://show`; this state only says it is on.
+    Battery,
     /// An activity wants attention, such as a timer that just ran out. A card that holds for a
     /// few seconds, and stays until its owner clears the alert. Its content travels on the
     /// owner's event.
@@ -45,6 +48,7 @@ impl IslandState {
             Self::Lyrics => (620.0, 224.0),
             Self::Hud => (260.0, 30.0),
             Self::Notification => (260.0, 30.0),
+            Self::Battery => (260.0, 30.0),
             Self::Alert => (320.0, 64.0),
             Self::Tucked => (64.0, 5.0),
             Self::Hidden => (0.0, 0.0),
@@ -68,6 +72,7 @@ pub struct Inputs {
     pub covered: bool,
     pub wide: bool,
     pub transient: bool,
+    pub battery: bool,
     pub notification: bool,
     pub activity: bool,
     pub alert: bool,
@@ -81,11 +86,14 @@ pub struct Inputs {
 ///    notification, so an incoming message never hides a finished countdown.
 /// 3. Hover expands (to the lyrics layout when it is wide).
 /// 4. A transient overlay (the HUD) shows over the rest.
-/// 5. A notification shows under the HUD, so a volume or brightness change is never hidden by a
+/// 5. A battery pill (charger, full, low battery) shows under the HUD and over a notification. It
+///    is a short, physical event the user just caused, so it is not left waiting behind a message.
+///    A notification that lands meanwhile keeps its own timer and shows once the pill gives way.
+/// 6. A notification shows under the HUD, so a volume or brightness change is never hidden by a
 ///    message. Like the HUD, it shows over a covered notch.
-/// 6. A covered notch tucks, even while an activity runs.
-/// 7. A live activity owns the compact pill, in place of media.
-/// 8. Media shows the active pill, and otherwise the island idles.
+/// 7. A covered notch tucks, even while an activity runs.
+/// 8. A live activity owns the compact pill, in place of media.
+/// 9. Media shows the active pill, and otherwise the island idles.
 pub fn resolve(inputs: Inputs) -> IslandState {
     if inputs.fullscreen {
         IslandState::Hidden
@@ -97,6 +105,8 @@ pub fn resolve(inputs: Inputs) -> IslandState {
         IslandState::Expanded
     } else if inputs.transient {
         IslandState::Hud
+    } else if inputs.battery {
+        IslandState::Battery
     } else if inputs.notification {
         IslandState::Notification
     } else if inputs.covered {
@@ -118,6 +128,7 @@ pub struct IslandStateMachine {
     covered: bool,
     wide: bool,
     transient: bool,
+    battery: bool,
     notification: bool,
     activity: Option<ActivityKind>,
     alert: Option<ActivityKind>,
@@ -132,6 +143,7 @@ impl IslandStateMachine {
             covered: self.covered,
             wide: self.wide,
             transient: self.transient,
+            battery: self.battery,
             notification: self.notification,
             activity: self.activity.is_some(),
             alert: self.alert.is_some(),
@@ -161,6 +173,11 @@ impl IslandStateMachine {
     /// Whether a transient overlay (the HUD) is on screen. Owned by `modules::hud`.
     pub fn set_transient(&mut self, transient: bool) {
         self.transient = transient;
+    }
+
+    /// Whether a battery pill is on screen. Owned by `modules::battery`.
+    pub fn set_battery(&mut self, battery: bool) {
+        self.battery = battery;
     }
 
     /// Whether a notification is on screen. Owned by `modules::notifications`.
@@ -219,7 +236,7 @@ mod tests {
 
     /// Each precedence rung as the inputs that trigger it on their own, and the state it gives.
     /// Listed highest first, the same order as `resolve`.
-    fn rungs() -> [(Inputs, IslandState); 9] {
+    fn rungs() -> [(Inputs, IslandState); 10] {
         use IslandState::*;
         let base = Inputs::default();
         [
@@ -231,6 +248,7 @@ mod tests {
             ),
             (Inputs { hovered: true, ..base }, Expanded),
             (Inputs { transient: true, ..base }, Hud),
+            (Inputs { battery: true, ..base }, Battery),
             (Inputs { notification: true, ..base }, Notification),
             (Inputs { covered: true, ..base }, Tucked),
             (Inputs { activity: true, ..base }, Activity),
@@ -246,6 +264,7 @@ mod tests {
             covered: a.covered || b.covered,
             wide: a.wide || b.wide,
             transient: a.transient || b.transient,
+            battery: a.battery || b.battery,
             notification: a.notification || b.notification,
             activity: a.activity || b.activity,
             alert: a.alert || b.alert,
@@ -371,6 +390,7 @@ mod tests {
         machine.set_covered(true);
         machine.set_wide(true);
         machine.set_transient(true);
+        machine.set_battery(true);
         machine.set_notification(true);
         machine.set_activity(Some(ActivityKind::Timer));
         machine.set_alert(Some(ActivityKind::Timer));
@@ -409,6 +429,51 @@ mod tests {
         machine.set_transient(false);
         machine.set_hovered(true);
         assert_eq!(machine.current(), IslandState::Expanded);
+    }
+
+    /// A battery pill shows over a tucked or playing island and gives way when it ends.
+    #[test]
+    fn battery_shows_over_tucked_and_active_then_returns() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_covered(true);
+        machine.set_media_playing(true);
+        machine.set_battery(true);
+        assert_eq!(machine.current(), IslandState::Battery);
+
+        machine.set_battery(false);
+        assert_eq!(machine.current(), IslandState::Tucked);
+    }
+
+    /// The battery pill sits under the HUD and the alert, over a notification, and hover wins.
+    #[test]
+    fn battery_yields_to_alert_hud_and_hover_but_beats_a_notification() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_notification(true);
+        machine.set_battery(true);
+        assert_eq!(machine.current(), IslandState::Battery);
+
+        machine.set_transient(true);
+        assert_eq!(machine.current(), IslandState::Hud);
+        machine.set_transient(false);
+
+        machine.set_activity(Some(ActivityKind::Timer));
+        machine.set_alert(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Alert);
+        machine.set_alert(None);
+
+        machine.set_hovered(true);
+        assert_eq!(machine.current(), IslandState::Expanded);
+        machine.set_hovered(false);
+
+        machine.set_battery(false);
+        assert_eq!(machine.current(), IslandState::Notification);
+    }
+
+    #[test]
+    fn battery_pill_is_compact_and_fits_the_window() {
+        assert_eq!(IslandState::Battery.pill_size(), (260.0, 30.0));
+        let (w, h) = IslandState::Battery.pill_size();
+        assert!(w <= 720.0 && h <= 240.0);
     }
 
     #[test]

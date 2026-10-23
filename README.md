@@ -9,6 +9,7 @@ A Dynamic Island-style notch overlay for Windows. Tauri 2 (Rust) + Svelte 5 + Ty
 - **Expanded** (hover): two pages, switched by the dots, a wheel turn, or a horizontal swipe. The **Media** page shows album art, title, artist, the current synced lyric line (or "Playing from <app>" when there are no lyrics), and previous / play-pause / next controls. The **Controls** page has volume and brightness sliders and toggle tiles (Wi-Fi, Bluetooth, airplane, mute, keep awake, lock), driven by the controls backend. Opening the panel picks the page: the last one if it was left within 8 s, otherwise Media when something is playing, else Controls. The page list lives in `src/stores/pages.ts`. On the Media page, when the track has synced lyrics, hovering widens the panel into a lyrics layout: circular album art, large transport controls centred under it, and three lyric lines (the current one up to two lines) over a tint taken from the album art.
 - **HUD** (the system volume, mute or panel brightness changed): the pill widens into a slim bar for about 1.6 s, then gives way again. Each new change restarts that time. Hover still wins, and a fullscreen app still hides the notch (see Volume and brightness HUD below).
 - **Notification** (another app shows a Windows toast): a slim pill for 5 s with the app's initial, the title and the start of the body. Newer ones wait their turn. Off in Settings, or per app. It needs Windows' notification access (see Notifications below).
+- **Battery** (the charger is plugged in or out, the battery is full, or it is low): a slim pill for 3 s with a battery glyph, the level, and the words. A low warning shows for 5 s, amber at 20% and red at 10%. A desktop with no battery shows nothing (see Battery alerts below).
 - **Activity** (a timer is running, paused, or finished and waiting to be dismissed): the compact pill shows a ring on the left and the time on the right, with the word in the middle (Timer, Stopwatch, Focus, Break, Long break, Paused or Done). A pomodoro also shows one dot per focus session. It takes the place of the media title and bars. Hover expands it as usual.
 - **Alert** (a countdown just reached zero): a card for about 4 s, with the copy, **+1 min** and **Dismiss**. It holds even under the pointer, so its buttons stay where they are.
 - **Tucked** (a window sits under the notch): shrinks to a thin sliver. Hover it for 250 ms to open it. A covering window also tucks a live activity.
@@ -36,7 +37,7 @@ Other commands: `npm run tauri build` (release bundle), `npm run check` (Svelte/
 | --- | --- | --- |
 | Overlay shell | `src-tauri/src/window.rs` | Frameless transparent window, `WS_EX_TOOLWINDOW`/`WS_EX_NOACTIVATE` (guarded by a window subclass so Tauri can't reset them), top-center placement, cursor-poll click-through |
 | State machine | `src-tauri/src/state.rs` | `Idle` / `Active` / `Expanded` / `Tucked` / `Hidden`, emitted as `island://state` |
-| Modules | `src-tauri/src/modules/` | Isolated feature modules; they emit events and never touch the window. `media.rs` reports playback, `lyrics.rs` fetches synced lyrics for the current track, `context.rs` reports screen presence, `notifications.rs` shows other apps' toasts |
+| Modules | `src-tauri/src/modules/` | Isolated feature modules; they emit events and never touch the window. `media.rs` reports playback, `lyrics.rs` fetches synced lyrics for the current track, `context.rs` reports screen presence, `notifications.rs` shows other apps' toasts, `battery.rs` shows charger and low-battery pills |
 | Frontend | `src/` | Renders whatever state it receives; animates only `transform` and `opacity` |
 
 **Click-through:** the window is bigger than the pill and ignores the mouse by default. A thread polls `GetCursorPos` at ~60 Hz, and only on entering or leaving the pill bounds does it toggle click-through and emit `island://hover`.
@@ -75,7 +76,7 @@ The **Timer** page (page id `timer`) runs three clocks: a countdown with quick p
 
 The fixed rules, which the tests pin down: a finished timer stays in the pill until dismissed, and "+1 min" starts it again with that minute left. A late tick does not drift a pomodoro, because each phase starts at the moment the previous one ended. Nothing is persisted except the settings below.
 
-Precedence (highest first): fullscreen hides it; an alert shows over hover; hover expands; the HUD; a notification; a covering window tucks it; the activity; media. When a timer runs and media plays, the timer owns the compact pill.
+Precedence (highest first): fullscreen hides it; an alert shows over hover; hover expands; the HUD; a battery pill; a notification; a covering window tucks it; the activity; media. When a timer runs and media plays, the timer owns the compact pill.
 
 ## Notifications
 
@@ -95,6 +96,20 @@ The ring is two half discs, each turning inside its half of the ring, so only `t
 
 Settings > Timer holds the sound (one system beep when a countdown ends) and the pomodoro lengths (focus 1 to 120 min, breaks 1 to 60 min). They live in `config.json`. Turn the page on in Settings > Notch pages. The page is off in configs written before it existed.
 
+## Battery alerts
+
+`modules/battery.rs` shows a pill when the charger is plugged in or out, when the battery reaches 100% on the charger, and when it falls to 20% or 10% on battery. A poller reads `GetSystemPowerStatus` every 2 s on its own thread. It is a plain Win32 call, so there is no COM or WinRT here. A `Tracker` turns each reading into the events, and a `Slot` holds the pill for its time. Both are pure, and the tests pin their rules down.
+
+- **Charging** shows "Charging" with the level, a green glyph with a bolt, for 3 s. **On battery** (unplugged) shows a white glyph for 3 s. **Fully charged** shows once per charge, green with the bolt.
+- **Low battery** warns at 20% (amber) and at 10% (red), for 5 s. Each threshold fires once per discharge. It re-arms when the charger is plugged in, or when the level rises 3 points above it, so a level hovering at the threshold does not warn on every dip.
+- The first reading after launch is silent. A level already low at launch counts as shown, so nothing alerts at startup.
+- Precedence: a battery pill sits under the HUD and the alert, and over a notification, so a plug event is not held back behind a message. A notification keeps its own timer while the pill is up, and shows once the pill gives way. Hover and fullscreen hide it, as they hide the HUD.
+- One pill at a time. A newer event replaces the one on screen and restarts its time.
+
+Settings > Battery holds three switches, all on by default: the feature, the charger and full-charge pills, and the low-battery warnings. They live in `config.json` as `battery` (`enabled`, `chargeAlerts`, `lowBatteryAlerts`). The line under them shows the live state, such as "Battery 82%, charging", or "No battery detected" on a desktop, where the switches are off. Nothing is written to disk.
+
+Limits: a level change shows up to 2 s late, and some drivers report the level in steps. A UPS that reports a battery to Windows counts as one, so its mains loss shows as a discharge.
+
 ## Quick controls
 
 `modules/controls.rs` backs the notch's quick settings. Each control is a `Control` impl in `modules/controls/`, listed in the `CONTROLS` registry. Nothing polls: the frontend calls `controls_list` when the notch opens, `controls_set` for sliders and toggles, and `controls_press` for buttons. Unavailable controls come back with `supported: false` and a reason in `detail`.
@@ -105,7 +120,7 @@ Ids: `volume`, `mute`, `mic`, `brightness`, `wifi`, `bluetooth`, `airplane`, `lo
 
 The tray icon opens **Settings** on left-click (or from its menu). Settings is a second window, built on first use and hidden, not closed, when you close it. The tray menu also has **Quit Notchy**, the only way to exit the app.
 
-Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, show the time when idle, the volume and brightness HUD, confirm before locking, launch at login, the timer's sound and pomodoro lengths, and the notifications switch with its app list. Every change saves at once and applies live.
+Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, show the time when idle, the volume and brightness HUD, confirm before locking, launch at login, the timer's sound and pomodoro lengths, the notifications switch with its app list, and the battery alerts with their live status line. Every change saves at once and applies live.
 
 The file is `config.json` in the app config directory (`%APPDATA%\com.notchy.app\config.json`). The notification app list is `notification-apps.json` beside it. `config.rs` owns it: a missing or corrupt file gives the defaults, and saves are written through a temp file and renamed. A leading UTF-8 byte order mark (which Windows PowerShell writes) is skipped on load, so a hand-edited file keeps its settings. Launch at login is the `Notchy` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 
@@ -132,4 +147,5 @@ Apple's SF is **not bundled**. Its licence limits use to Apple platforms, so Not
 - Only the primary monitor is supported.
 - The volume and brightness HUD follows the default output and the built-in panel. External monitors show no brightness HUD, and the native Windows OSD still appears alongside it.
 - One timer runs at a time, and its state is not kept across restarts. The stopwatch keeps 20 laps; later laps are ignored.
+- Battery alerts read the level every 2 s, so a change can show up that late. A PC with no battery never shows a pill. The pills were checked in a browser harness that drives the same events. A real plug or unplug has not been tested on the Tauri window.
 - Notifications need Windows' "Let apps access your notifications" switch on. They are read by polling every 1.5 s, so a toast can show up to about 1.5 s late. There is no click action and no icon, and Focus assist is not checked. The notification pill also takes the cursor like the HUD does, so the notch does not click through there.
