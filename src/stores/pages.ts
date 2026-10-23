@@ -2,11 +2,12 @@ import { derived, get, writable } from "svelte/store";
 import { mediaState } from "./media";
 import { config } from "./config";
 
-export type Page = "media" | "controls";
+export type Page = "media" | "controls" | "timer";
 
 export const PAGE_LABELS: Record<Page, string> = {
   media: "Media",
   controls: "Controls",
+  timer: "Timer",
 };
 
 // A page the user left this recently is the one they get back when the panel reopens.

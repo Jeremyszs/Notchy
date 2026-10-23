@@ -33,6 +33,10 @@
   let confirmLock = DEFAULT_CONFIG.confirmLock;
   let launchAtLogin = DEFAULT_CONFIG.launchAtLogin;
   let font: FontId = DEFAULT_CONFIG.font;
+  let timerSound = DEFAULT_CONFIG.timerSound;
+  let focusMinutes = DEFAULT_CONFIG.focusMinutes;
+  let shortBreakMinutes = DEFAULT_CONFIG.shortBreakMinutes;
+  let longBreakMinutes = DEFAULT_CONFIG.longBreakMinutes;
   let confirmingReset = false;
   let status = "";
   let version = "";
@@ -111,7 +115,18 @@
       launchAtLogin,
       font,
       hud: showHud,
+      timerSound,
+      focusMinutes,
+      shortBreakMinutes,
+      longBreakMinutes,
     };
+  }
+
+  // A typed minute count, kept inside its range. Text that is not a number keeps the old value.
+  function readMinutes(input: HTMLInputElement, current: number, min: number, max: number): number {
+    const value = Number(input.value);
+    if (input.value.trim() === "" || !Number.isFinite(value)) return current;
+    return Math.min(max, Math.max(min, Math.round(value)));
   }
 
   function chooseFont(id: FontId): void {
@@ -168,6 +183,10 @@
     confirmLock = settings.confirmLock;
     launchAtLogin = settings.launchAtLogin;
     font = settings.font;
+    timerSound = settings.timerSound;
+    focusMinutes = settings.focusMinutes;
+    shortBreakMinutes = settings.shortBreakMinutes;
+    longBreakMinutes = settings.longBreakMinutes;
   }
 
   function resetDefaults(): void {
@@ -317,6 +336,80 @@
               scheduleSave();
             }}
           />
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="timer-title">
+      <h2 id="timer-title">Timer</h2>
+      <ul class="group">
+        <li class="row">
+          <span class="text"><span class="label">Sound when a timer ends</span></span>
+          <Switch
+            checked={timerSound}
+            label="Sound when a timer ends"
+            onchange={(on) => {
+              timerSound = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Pomodoro focus</span></span>
+          <span class="minutes-field">
+            <input
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="120"
+              value={focusMinutes}
+              aria-label="Pomodoro focus length in minutes"
+              onchange={(event) => {
+                focusMinutes = readMinutes(event.currentTarget, focusMinutes, 1, 120);
+                event.currentTarget.value = String(focusMinutes);
+                scheduleSave();
+              }}
+            />
+            <span>min</span>
+          </span>
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Short break</span></span>
+          <span class="minutes-field">
+            <input
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="60"
+              value={shortBreakMinutes}
+              aria-label="Short break length in minutes"
+              onchange={(event) => {
+                shortBreakMinutes = readMinutes(event.currentTarget, shortBreakMinutes, 1, 60);
+                event.currentTarget.value = String(shortBreakMinutes);
+                scheduleSave();
+              }}
+            />
+            <span>min</span>
+          </span>
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Long break, after four focus sessions</span></span>
+          <span class="minutes-field">
+            <input
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="60"
+              value={longBreakMinutes}
+              aria-label="Long break length in minutes"
+              onchange={(event) => {
+                longBreakMinutes = readMinutes(event.currentTarget, longBreakMinutes, 1, 60);
+                event.currentTarget.value = String(longBreakMinutes);
+                scheduleSave();
+              }}
+            />
+            <span>min</span>
+          </span>
         </li>
       </ul>
     </section>
@@ -497,6 +590,30 @@
   .label {
     font-size: 15px;
     line-height: 20px;
+  }
+
+  .minutes-field {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .minutes-field input {
+    width: 64px;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 
   .reset {

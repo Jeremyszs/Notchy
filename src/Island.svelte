@@ -17,7 +17,11 @@
   import { refresh as refreshControls } from "./stores/controls";
   import { hud } from "./stores/hud";
   import { hudFill, hudIcon, hudLabel, type HudIcon } from "./lib/hud";
+  import { alertCopy, palette, ringRotations } from "./lib/timer";
+  import { lastFinish, timerState, timerView, addTime, dismissTimer } from "./stores/timer";
   import ControlsPage from "./ControlsPage.svelte";
+  import RollingClock from "./RollingClock.svelte";
+  import TimerPage from "./TimerPage.svelte";
   import { fade, fly } from "svelte/transition";
   import { islandPath } from "./lib/shape";
   import { createWheelGesture } from "./lib/wheel";
@@ -32,7 +36,9 @@
   const SIZES: Record<Shown, { w: number; h: number; ear: number }> = {
     idle: { w: 120, h: 30, ear: 10 },
     active: { w: 200, h: 30, ear: 10 },
+    activity: { w: 220, h: 30, ear: 10 },
     hud: { w: 260, h: 30, ear: 10 },
+    alert: { w: 320, h: 64, ear: 10 },
     expanded: { w: 380, h: 184, ear: 10 },
     lyrics: { w: 620, h: 214, ear: 10 },
     tucked: { w: 64, h: 5, ear: 2.5 },
@@ -67,6 +73,19 @@
   const NO_WINDOW = { prev: "", current: "", next: "" };
   $: lyricWindow = $currentLine ?? NO_WINDOW;
   $: stackKey = `${lyricWindow.prev}\u0000${lyricWindow.current}\u0000${lyricWindow.next}`;
+
+  // The live activity is a running, paused or finished timer. It takes the compact pill from media.
+  // Its ring and digits come from the timer store, which extrapolates between backend updates.
+  $: timer = $timerView;
+  // The alert card shows the newest countdown that ended, until its owner clears it.
+  $: alertText = $lastFinish ? alertCopy($lastFinish.data, $timerState.snapshot) : null;
+  $: alertColors = $lastFinish
+    ? palette($lastFinish.data.mode, $lastFinish.data.phase)
+    : palette("timer");
+  // The ripple plays once each time a new card comes up. Zero means no card.
+  $: alertKey = $islandState === "alert" && $lastFinish ? $lastFinish.id : 0;
+  // The last ten seconds beat once per displayed second. The key changes with the digits.
+  $: beatKey = timer.lastTen ? timer.label : "";
 
   // The compact pill shows the title, or the artist when the title is empty.
   $: activeLabel = $mediaState.title || $mediaState.artist;
@@ -147,6 +166,45 @@
     swipeFrom = (event.target as Element).closest("input")
       ? null
       : { x: event.clientX, y: event.clientY };
+  }
+
+  // Plays a soft ring-out once each time `key` moves to a new card. Transform and opacity only.
+  function ripple(node: HTMLElement, key: number) {
+    let last = key;
+    return {
+      update(next: number) {
+        const fresh = next !== 0 && next !== last;
+        last = next;
+        if (!fresh || reduceMotion) return;
+        node.animate(
+          [
+            { transform: "scale(1)", opacity: 0.85 },
+            { transform: "scale(2.6)", opacity: 0 },
+          ],
+          { duration: 900, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+        );
+      },
+    };
+  }
+
+  // A one-step bump of the digits, once per displayed second in the last ten.
+  function beat(node: HTMLElement, key: string) {
+    let last = key;
+    return {
+      update(next: string) {
+        const fresh = next !== "" && next !== last;
+        last = next;
+        if (!fresh || reduceMotion) return;
+        node.animate(
+          [
+            { transform: "scale(1)" },
+            { transform: "scale(1.06)" },
+            { transform: "scale(1)" },
+          ],
+          { duration: 300, easing: "ease-out" },
+        );
+      },
+    };
   }
 
   function swipeEnd(event: PointerEvent) {
@@ -239,6 +297,20 @@
   {/if}
 {/snippet}
 
+{#snippet ring(fraction: number, from: string, to: string)}
+  {@const turn = ringRotations(fraction)}
+  <span
+    class="ring"
+    style="--right: {turn.right}deg; --left: {turn.left}deg; --from: {from}; --to: {to}"
+    aria-hidden="true"
+  >
+    <span class="track"></span>
+    <span class="half right"><span class="disc"></span></span>
+    <span class="half left"><span class="disc"></span></span>
+    <span class="core"></span>
+  </span>
+{/snippet}
+
 {#snippet outline(name: Shown)}
   {@const { w, h, ear } = SIZES[name]}
   <svg
@@ -287,6 +359,34 @@
   </div>
 
   <div
+    class="shape activity"
+    class:on={$islandState === "activity"}
+    style={shapeStyle("activity", shown)}
+    aria-hidden="true"
+  >
+    <div class="frame" style={frameStyle("activity", shown)}>
+      {@render outline("activity")}
+      <div
+        class="content activity-row"
+        class:paused={timer.status === "paused"}
+        style="--c: {timer.palette.from}; --c2: {timer.palette.to}"
+      >
+        {#if timer.mode === "stopwatch"}
+          <svg class="stopwatch-glyph" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="13.5" r="7.5" />
+            <path d="M12 13.5V10M9.5 3h5" />
+          </svg>
+        {:else}
+          {@render ring(timer.fraction, timer.palette.from, timer.palette.to)}
+        {/if}
+        <div class="clock-slot" use:beat={beatKey}>
+          <RollingClock text={timer.label} />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
     class="shape hud"
     class:on={$islandState === "hud"}
     style={shapeStyle("hud", shown)}
@@ -306,6 +406,33 @@
           <span class="hud-fill" style="transform: scaleX({hudFraction})"></span>
         </div>
         <span class="hud-value">{hudText}</span>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="shape alert"
+    class:on={$islandState === "alert"}
+    style="{shapeStyle('alert', shown)}; --c: {alertColors.from}; --c2: {alertColors.to}"
+    role="group"
+    aria-label="Timer finished"
+  >
+    <div class="frame" style={frameStyle("alert", shown)}>
+      <span class="glow" aria-hidden="true"></span>
+      {@render outline("alert")}
+      <div class="content alert-row">
+        <div class="alert-ring" use:ripple={alertKey}>
+          {@render ring(1, alertColors.from, alertColors.to)}
+          <span class="ripple" aria-hidden="true"></span>
+        </div>
+        <div class="alert-copy" role="status">
+          <div class="alert-title">{alertText?.title ?? ""}</div>
+          <div class="alert-sub">{alertText?.detail ?? ""}</div>
+        </div>
+        <div class="alert-actions">
+          <button type="button" class="pill" onclick={() => addTime(60_000)}>+1 min</button>
+          <button type="button" class="pill strong" onclick={() => dismissTimer()}>Dismiss</button>
+        </div>
       </div>
     </div>
   </div>
@@ -332,7 +459,9 @@
               style="--x: {pageOffset(id)}px"
               inert={$page !== id}
             >
-              {#if id === "media"}
+              {#if id === "timer"}
+                <TimerPage />
+              {:else if id === "media"}
                 {#if $mediaState.active}
                   <div class="now">
                     {@render albumArt("lg")}
@@ -1033,6 +1162,211 @@
     overflow: hidden;
   }
 
+  /* The live activity. The ring is a pair of half discs: each disc turns inside its half, and the
+     clip shows only its own semicircle. Only transform changes, once a second, so the browser
+     runs the sweep on the compositor. Reduced motion jumps to each new angle. */
+  .activity-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .activity-row .ring {
+    width: 16px;
+    height: 16px;
+  }
+
+  .activity-row .clock-slot {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    transition: opacity 300ms ease;
+  }
+
+  .activity-row.paused .clock-slot {
+    opacity: 0.5;
+  }
+
+  .stopwatch-glyph {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: var(--c);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .ring {
+    position: relative;
+    display: block;
+    flex: none;
+    border-radius: 50%;
+  }
+
+  .ring .track,
+  .ring .core {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+  }
+
+  .ring .track {
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  /* The core is the pill's black, so only the 2 px band shows the ring. */
+  .ring .core {
+    inset: 2px;
+    background: #000;
+  }
+
+  .ring .half {
+    position: absolute;
+    top: 0;
+    width: 50%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .ring .half.right {
+    left: 50%;
+  }
+
+  .ring .half.left {
+    left: 0;
+  }
+
+  .ring .disc {
+    position: absolute;
+    top: 0;
+    width: 200%;
+    height: 100%;
+    border-radius: 50%;
+    background: linear-gradient(var(--from), var(--to));
+    transition: transform 1s linear;
+  }
+
+  .ring .half.right .disc {
+    left: -100%;
+    clip-path: inset(0 0 0 50%);
+    transform: rotate(var(--right));
+  }
+
+  .ring .half.left .disc {
+    left: 0;
+    clip-path: inset(0 50% 0 0);
+    transform: rotate(var(--left));
+  }
+
+  /* The finished card. Its glow sits under the outline, so only the halo shows past the edge. */
+  .alert-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+  }
+
+  .alert-ring {
+    position: relative;
+    flex: none;
+    width: 22px;
+    height: 22px;
+  }
+
+  .alert-ring .ring {
+    width: 22px;
+    height: 22px;
+  }
+
+  .alert-ring .ripple {
+    position: absolute;
+    inset: 0;
+    border: 2px solid var(--c);
+    border-radius: 50%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .glow {
+    position: absolute;
+    inset: 6px 4px 0;
+    border-radius: 26px;
+    box-shadow: 0 0 26px 6px var(--c);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .shape.alert.on .glow {
+    animation: glow 2400ms ease-out forwards;
+  }
+
+  @keyframes glow {
+    0% {
+      opacity: 0;
+    }
+    14% {
+      opacity: 0.6;
+    }
+    100% {
+      opacity: 0.16;
+    }
+  }
+
+  .alert-copy {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .alert-title {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .alert-sub {
+    overflow: hidden;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .alert-actions {
+    display: flex;
+    flex: none;
+    gap: 6px;
+  }
+
+  .alert .pill {
+    height: 26px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .alert .pill.strong {
+    background: linear-gradient(90deg, var(--c), var(--c2));
+    color: #000;
+  }
+
+  .alert .pill:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.7);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .island,
     .shape,
@@ -1053,6 +1387,20 @@
     /* The bar still shows the level, but it jumps to it rather than gliding. */
     .hud-fill {
       transition: none;
+    }
+
+    .ring .disc,
+    .activity-row .clock-slot {
+      transition: none;
+    }
+
+    .shape.alert.on .glow {
+      animation: none;
+      opacity: 0.35;
+    }
+
+    .alert-ring .ripple {
+      display: none;
     }
   }
 </style>

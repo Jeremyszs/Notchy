@@ -6,7 +6,9 @@ A Dynamic Island-style notch overlay for Windows. Tauri 2 (Rust) + Svelte 5 + Ty
 - **Active** (media playing): the pill widens, showing album art and equalizer bars. The bars follow the system's audio output while this pill is on screen (see Audio levels below), and animate on a timer otherwise.
 - **Expanded** (hover): two pages, switched by the dots, a wheel turn, or a horizontal swipe. The **Media** page shows album art, title, artist, the current synced lyric line (or "Playing from <app>" when there are no lyrics), and previous / play-pause / next controls. The **Controls** page has volume and brightness sliders and toggle tiles (Wi-Fi, Bluetooth, airplane, mute, keep awake, lock), driven by the controls backend. Opening the panel picks the page: the last one if it was left within 8 s, otherwise Media when something is playing, else Controls. The page list lives in `src/stores/pages.ts`. On the Media page, when the track has synced lyrics, hovering widens the panel into a lyrics layout: circular album art, large transport controls centred under it, and three lyric lines (the current one up to two lines) over a tint taken from the album art.
 - **HUD** (the system volume, mute or panel brightness changed): the pill widens into a slim bar for about 1.6 s, then gives way again. Each new change restarts that time. Hover still wins, and a fullscreen app still hides the notch (see Volume and brightness HUD below).
-- **Tucked** (a window sits under the notch): shrinks to a thin sliver. Hover it for 250 ms to open it.
+- **Activity** (a timer is running, paused, or finished and waiting to be dismissed): the compact pill shows a ring on the left and the time on the right, in place of the media title and bars. Hover expands it as usual.
+- **Alert** (a countdown just reached zero): a card for about 4 s, with the copy, **+1 min** and **Dismiss**. It holds even under the pointer, so its buttons stay where they are.
+- **Tucked** (a window sits under the notch): shrinks to a thin sliver. Hover it for 250 ms to open it. A covering window also tucks a live activity.
 - **Hidden** (a fullscreen app owns the monitor): fully invisible and non-interactive.
 
 ## Prerequisites
@@ -62,6 +64,20 @@ A tucked sliver only expands after the cursor has stayed on it for 250 ms (`TUCK
 
 The HUD does not hide the native Windows volume or brightness OSD. Windows draws its own flyout for the volume and brightness keys, and Notchy has no safe, documented hook to suppress it, so both appear. Brightness only shows where the panel's driver raises the WMI brightness event. External monitors (DDC/CI) raise no event, so they show no HUD.
 
+## Timer, stopwatch and pomodoro
+
+The **Timer** page (page id `timer`) runs three clocks: a countdown with quick presets (1, 5, 10, 25 min) and a stepper, a stopwatch with laps (at most 20), and a pomodoro cycle (25 min focus, 5 min short break, 15 min long break after four focus sessions, phases advancing on their own). One clock runs at a time, and the mode cannot change while it runs.
+
+`modules/timer.rs` owns the clock, so a running timer survives page changes, a hidden notch and a closed Settings window. `Engine` is pure: every method takes the instant to act at, and the tests pass fixed times. A worker thread sleeps on a condition variable until the next deadline (a countdown reaching zero, or the alert giving way), so nothing polls. Commands change the engine under the same lock and wake the worker. The backend emits `timer://update` with a snapshot (including `endsAtMs`, so the frontend counts down between updates), `timer://finished` when a countdown ends, and the island state (`activity`, `alert`). Commands: `timer_snapshot`, `timer_select`, `timer_start`, `timer_pause`, `timer_resume`, `timer_reset`, `timer_add_ms`, `timer_lap`, `timer_dismiss`.
+
+The fixed rules, which the tests pin down: a finished timer stays in the pill until dismissed, and "+1 min" starts it again with that minute left. A late tick does not drift a pomodoro, because each phase starts at the moment the previous one ended. Nothing is persisted except the settings below.
+
+Precedence (highest first): fullscreen hides it; an alert shows over hover; hover expands; the HUD; a covering window tucks it; the activity; media. When a timer runs and media plays, the timer owns the compact pill.
+
+The ring is two half discs, each turning inside its half of the ring, so only `transform` changes, about once a second, and the compositor runs the sweep. The digits roll like an odometer: each changed digit leaves upward while its replacement rises from below over 220 ms (`cubic-bezier(.2,.8,.2,1)`), in fixed tabular columns, and reduced motion keeps a 150 ms crossfade. The last ten seconds beat once a second. The finished ring ripples outward and the card springs open, using the island's own shape easing.
+
+Settings > Timer holds the sound (one system beep when a countdown ends) and the pomodoro lengths (focus 1 to 120 min, breaks 1 to 60 min). They live in `config.json`. Turn the page on in Settings > Notch pages. The page is off in configs written before it existed.
+
 ## Quick controls
 
 `modules/controls.rs` backs the notch's quick settings. Each control is a `Control` impl in `modules/controls/`, listed in the `CONTROLS` registry. Nothing polls: the frontend calls `controls_list` when the notch opens, `controls_set` for sliders and toggles, and `controls_press` for buttons. Unavailable controls come back with `supported: false` and a reason in `detail`.
@@ -72,9 +88,9 @@ Ids: `volume`, `mute`, `mic`, `brightness`, `wifi`, `bluetooth`, `airplane`, `lo
 
 The tray icon opens **Settings** on left-click (or from its menu). Settings is a second window, built on first use and hidden, not closed, when you close it. The tray menu also has **Quit Notchy**, the only way to exit the app.
 
-Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, the volume and brightness HUD, confirm before locking, and launch at login. Every change saves at once and applies live.
+Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, the volume and brightness HUD, confirm before locking, launch at login, and the timer's sound and pomodoro lengths. Every change saves at once and applies live.
 
-The file is `config.json` in the app config directory (`%APPDATA%\com.notchy.app\config.json`). `config.rs` owns it: a missing or corrupt file gives the defaults, and saves are written through a temp file and renamed. Launch at login is the `Notchy` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+The file is `config.json` in the app config directory (`%APPDATA%\com.notchy.app\config.json`). `config.rs` owns it: a missing or corrupt file gives the defaults, and saves are written through a temp file and renamed. A leading UTF-8 byte order mark (which Windows PowerShell writes) is skipped on load, so a hand-edited file keeps its settings. Launch at login is the `Notchy` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 
 ## Fonts
 
@@ -98,3 +114,4 @@ Apple's SF is **not bundled**. Its licence limits use to Apple platforms, so Not
 - Album art is read once per track; an app that publishes its thumbnail late may show the placeholder.
 - Only the primary monitor is supported.
 - The volume and brightness HUD follows the default output and the built-in panel. External monitors show no brightness HUD, and the native Windows OSD still appears alongside it.
+- One timer runs at a time, and its state is not kept across restarts. The stopwatch keeps 20 laps; later laps are ignored.

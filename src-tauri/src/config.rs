@@ -25,7 +25,11 @@ use crate::modules::lyrics;
 const FILE_NAME: &str = "config.json";
 const UPDATE_EVENT: &str = "config://update";
 /// Page ids the notch knows how to show, in their default order.
-pub const PAGES: [&str; 2] = ["media", "controls"];
+pub const PAGES: [&str; 3] = ["media", "controls", "timer"];
+/// Pomodoro lengths in whole minutes: the bounds the settings and the file are held to.
+pub const FOCUS_MINUTES: (u32, u32, u32) = (25, 1, 120);
+pub const SHORT_BREAK_MINUTES: (u32, u32, u32) = (5, 1, 60);
+pub const LONG_BREAK_MINUTES: (u32, u32, u32) = (15, 1, 60);
 const DEFAULT_CONTROLS: [&str; 8] = [
     "volume",
     "brightness",
@@ -65,6 +69,14 @@ pub struct Config {
     pub font: String,
     /// Briefly show the volume and brightness HUD when either changes.
     pub hud: bool,
+    /// Play the system beep once when a timer or a pomodoro phase runs out.
+    pub timer_sound: bool,
+    /// Pomodoro focus length, in minutes. Held to FOCUS_MINUTES.
+    pub focus_minutes: u32,
+    /// Pomodoro short break length, in minutes. Held to SHORT_BREAK_MINUTES.
+    pub short_break_minutes: u32,
+    /// Pomodoro long break length, in minutes. Held to LONG_BREAK_MINUTES.
+    pub long_break_minutes: u32,
 }
 
 impl Default for Config {
@@ -77,8 +89,17 @@ impl Default for Config {
             launch_at_login: false,
             font: DEFAULT_FONT.to_string(),
             hud: true,
+            timer_sound: true,
+            focus_minutes: FOCUS_MINUTES.0,
+            short_break_minutes: SHORT_BREAK_MINUTES.0,
+            long_break_minutes: LONG_BREAK_MINUTES.0,
         }
     }
+}
+
+/// Keeps a minute setting inside its bounds. Out-of-range values are clamped, not reset.
+fn clamp_minutes((_, min, max): (u32, u32, u32), value: u32) -> u32 {
+    value.clamp(min, max)
 }
 
 impl Config {
@@ -111,6 +132,9 @@ impl Config {
             pages,
             controls,
             font,
+            focus_minutes: clamp_minutes(FOCUS_MINUTES, self.focus_minutes),
+            short_break_minutes: clamp_minutes(SHORT_BREAK_MINUTES, self.short_break_minutes),
+            long_break_minutes: clamp_minutes(LONG_BREAK_MINUTES, self.long_break_minutes),
             ..self
         }
     }
@@ -157,12 +181,18 @@ pub fn file_in(dir: &Path) -> PathBuf {
 }
 
 /// Reads the settings file. A missing or unreadable file, and invalid JSON, give the defaults.
-/// A partial file keeps the fields it has.
+/// A partial file keeps the fields it has. A leading UTF-8 byte order mark is skipped, since
+/// Windows PowerShell writes one and a parser would otherwise reject the whole file.
 pub fn load(path: &Path) -> Config {
     fs::read_to_string(path)
         .ok()
-        .and_then(|text| serde_json::from_str::<Config>(&text).ok())
+        .and_then(|text| serde_json::from_str::<Config>(strip_bom(&text)).ok())
         .map_or_else(Config::default, Config::sanitize)
+}
+
+/// The text without a leading byte order mark (U+FEFF), if it has one.
+fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
 /// Writes through a temp file and a rename, so a crash never leaves half a file behind.
@@ -349,7 +379,7 @@ mod tests {
             pages: ids(&["bogus"]),
             ..Config::default()
         };
-        assert_eq!(none_known.sanitize().pages, ids(&["media", "controls"]));
+        assert_eq!(none_known.sanitize().pages, ids(&["media", "controls", "timer"]));
 
         let one = Config {
             pages: ids(&["media"]),
@@ -416,9 +446,63 @@ mod tests {
         let json = serde_json::to_string(&Config::default()).unwrap();
         assert!(json.contains("\"confirmLock\":true"));
         assert!(json.contains("\"launchAtLogin\":false"));
-        assert!(json.contains("\"pages\":[\"media\",\"controls\"]"));
+        assert!(json.contains("\"pages\":[\"media\",\"controls\",\"timer\"]"));
         assert!(json.contains("\"font\":\"inter\""));
         assert!(json.contains("\"hud\":true"));
+        assert!(json.contains("\"timerSound\":true"));
+        assert!(json.contains("\"focusMinutes\":25"));
+        assert!(json.contains("\"shortBreakMinutes\":5"));
+        assert!(json.contains("\"longBreakMinutes\":15"));
+    }
+
+    /// PowerShell writes a byte order mark. Before the fix, such a file parsed as nothing and every
+    /// setting silently reset to its default.
+    #[test]
+    fn a_leading_byte_order_mark_does_not_reset_the_settings() {
+        assert_eq!(strip_bom("\u{feff}{\"lyrics\": false}"), "{\"lyrics\": false}");
+        assert_eq!(strip_bom("{\"lyrics\": false}"), "{\"lyrics\": false}");
+
+        let dir = scratch("bom");
+        fs::create_dir_all(&dir).unwrap();
+        let path = file_in(&dir);
+        fs::write(&path, "\u{feff}{\"lyrics\": false, \"timerSound\": false}").unwrap();
+        let config = load(&path);
+        assert!(!config.lyrics);
+        assert!(!config.timer_sound);
+        assert!(config.confirm_lock);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn pomodoro_minutes_are_clamped_to_their_bounds() {
+        let config = Config {
+            focus_minutes: 0,
+            short_break_minutes: 500,
+            long_break_minutes: 30,
+            ..Config::default()
+        }
+        .sanitize();
+        assert_eq!(config.focus_minutes, 1);
+        assert_eq!(config.short_break_minutes, 60);
+        assert_eq!(config.long_break_minutes, 30);
+
+        let high = Config {
+            focus_minutes: 999,
+            ..Config::default()
+        }
+        .sanitize();
+        assert_eq!(high.focus_minutes, 120);
+    }
+
+    #[test]
+    fn file_without_timer_settings_gets_the_defaults() {
+        let config: Config = serde_json::from_str(r#"{"lyrics": false}"#).unwrap();
+        let config = config.sanitize();
+        assert!(config.timer_sound);
+        assert_eq!(
+            (config.focus_minutes, config.short_break_minutes, config.long_break_minutes),
+            (25, 5, 15)
+        );
     }
 
     #[test]
@@ -583,7 +667,7 @@ mod tests {
         )
         .unwrap();
         let config = load(&path);
-        assert_eq!(config.pages, ids(&["media", "controls"]));
+        assert_eq!(config.pages, ids(&["media", "controls", "timer"]));
         assert_eq!(config.controls, ids(&["wifi"]));
         fs::remove_dir_all(&dir).unwrap();
     }

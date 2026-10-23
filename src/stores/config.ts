@@ -12,11 +12,15 @@ export interface Config {
   launchAtLogin: boolean;
   font: FontId;
   hud: boolean;
+  timerSound: boolean;
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
 }
 
 // The backend defaults. The notch uses them until the first answer arrives.
 export const DEFAULT_CONFIG: Config = {
-  pages: ["media", "controls"],
+  pages: ["media", "controls", "timer"],
   controls: [
     "volume",
     "brightness",
@@ -32,6 +36,10 @@ export const DEFAULT_CONFIG: Config = {
   launchAtLogin: false,
   font: "inter",
   hud: true,
+  timerSound: true,
+  focusMinutes: 25,
+  shortBreakMinutes: 5,
+  longBreakMinutes: 15,
 };
 
 const store = writable<Config>(DEFAULT_CONFIG);

@@ -5,10 +5,12 @@ import { listen } from "@tauri-apps/api/event";
 export type IslandState =
   | "idle"
   | "active"
+  | "activity"
   | "expanded"
   | "lyrics"
   | "tucked"
   | "hud"
+  | "alert"
   | "hidden";
 
 // The Rust side owns the state machine and pushes every change, so the store

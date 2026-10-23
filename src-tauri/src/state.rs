@@ -1,5 +1,6 @@
-//! Island state machine. Hover, media playback, screen presence and transient overlays feed in;
-//! the resolved state is emitted to the frontend and read by the cursor watcher for hit testing.
+//! Island state machine. Hover, media playback, screen presence, transient overlays and live
+//! activities feed in; the resolved state is emitted to the frontend and read by the cursor
+//! watcher for hit testing.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -12,6 +13,8 @@ pub enum IslandState {
     #[default]
     Idle,
     Active,
+    /// A live activity, such as a running timer, owns the compact pill. Media does not show here.
+    Activity,
     Expanded,
     /// Hovered while the media page has synced lyrics. A wider Expanded with the lyric stack.
     Lyrics,
@@ -20,6 +23,10 @@ pub enum IslandState {
     /// A transient overlay is up, such as the volume and brightness HUD. Slim, and gone after a
     /// moment. Its content travels on its own event; this state only says it is on screen.
     Hud,
+    /// An activity wants attention, such as a timer that just ran out. A card that holds for a
+    /// few seconds, and stays until its owner clears the alert. Its content travels on the
+    /// owner's event.
+    Alert,
     /// A fullscreen app owns the monitor. Invisible and never hit.
     Hidden,
 }
@@ -30,37 +37,63 @@ impl IslandState {
         match self {
             Self::Idle => (120.0, 30.0),
             Self::Active => (200.0, 30.0),
+            Self::Activity => (220.0, 30.0),
             Self::Expanded => (380.0, 184.0),
             Self::Lyrics => (620.0, 214.0),
             Self::Hud => (260.0, 30.0),
+            Self::Alert => (320.0, 64.0),
             Self::Tucked => (64.0, 5.0),
             Self::Hidden => (0.0, 0.0),
         }
     }
 }
 
-/// Precedence, highest first: fullscreen hides everything, hover expands (to the lyrics layout
-/// when it is wide), a transient overlay shows over the rest, a covered notch tucks, media shows
-/// the active pill, and otherwise the island idles. A HUD never takes over a hover or fullscreen.
-pub fn resolve(
-    hovered: bool,
-    media_playing: bool,
-    fullscreen: bool,
-    covered: bool,
-    wide: bool,
-    transient: bool,
-) -> IslandState {
-    if fullscreen {
+/// Which module owns a live activity or an alert. The island only needs the kind to know that
+/// something is on; the owner's own event carries the content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityKind {
+    Timer,
+}
+
+/// The inputs to `resolve`. Each flag is a fact the island reacts to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Inputs {
+    pub hovered: bool,
+    pub media_playing: bool,
+    pub fullscreen: bool,
+    pub covered: bool,
+    pub wide: bool,
+    pub transient: bool,
+    pub activity: bool,
+    pub alert: bool,
+}
+
+/// Precedence, highest first:
+///
+/// 1. Fullscreen hides everything.
+/// 2. An alert card shows, even over the pointer. It holds for a few seconds, and the pointer
+///    cannot push it aside, so its buttons stay where they are.
+/// 3. Hover expands (to the lyrics layout when it is wide).
+/// 4. A transient overlay (the HUD) shows over the rest.
+/// 5. A covered notch tucks, even while an activity runs.
+/// 6. A live activity owns the compact pill, in place of media.
+/// 7. Media shows the active pill, and otherwise the island idles.
+pub fn resolve(inputs: Inputs) -> IslandState {
+    if inputs.fullscreen {
         IslandState::Hidden
-    } else if hovered && wide {
+    } else if inputs.alert {
+        IslandState::Alert
+    } else if inputs.hovered && inputs.wide {
         IslandState::Lyrics
-    } else if hovered {
+    } else if inputs.hovered {
         IslandState::Expanded
-    } else if transient {
+    } else if inputs.transient {
         IslandState::Hud
-    } else if covered {
+    } else if inputs.covered {
         IslandState::Tucked
-    } else if media_playing {
+    } else if inputs.activity {
+        IslandState::Activity
+    } else if inputs.media_playing {
         IslandState::Active
     } else {
         IslandState::Idle
@@ -75,18 +108,22 @@ pub struct IslandStateMachine {
     covered: bool,
     wide: bool,
     transient: bool,
+    activity: Option<ActivityKind>,
+    alert: Option<ActivityKind>,
 }
 
 impl IslandStateMachine {
     pub fn current(&self) -> IslandState {
-        resolve(
-            self.hovered,
-            self.media_playing,
-            self.fullscreen,
-            self.covered,
-            self.wide,
-            self.transient,
-        )
+        resolve(Inputs {
+            hovered: self.hovered,
+            media_playing: self.media_playing,
+            fullscreen: self.fullscreen,
+            covered: self.covered,
+            wide: self.wide,
+            transient: self.transient,
+            activity: self.activity.is_some(),
+            alert: self.alert.is_some(),
+        })
     }
 
     pub fn set_hovered(&mut self, hovered: bool) {
@@ -112,6 +149,16 @@ impl IslandStateMachine {
     /// Whether a transient overlay (the HUD) is on screen. Owned by `modules::hud`.
     pub fn set_transient(&mut self, transient: bool) {
         self.transient = transient;
+    }
+
+    /// The live activity that owns the compact pill, or None. Owned by its module.
+    pub fn set_activity(&mut self, activity: Option<ActivityKind>) {
+        self.activity = activity;
+    }
+
+    /// The alert card, or None. Owned by the module that raised it.
+    pub fn set_alert(&mut self, alert: Option<ActivityKind>) {
+        self.alert = alert;
     }
 }
 
@@ -153,85 +200,59 @@ pub fn island_set_wide(app: AppHandle, island: State<'_, SharedIsland>, wide: bo
 mod tests {
     use super::*;
 
-    /// Every combination of inputs, in precedence order, with the state it must resolve to.
-    /// Columns: hovered, media_playing, fullscreen, covered, wide, transient -> expected.
-    #[test]
-    fn resolve_follows_precedence_for_every_input_combination() {
+    /// Each precedence rung as the inputs that trigger it on their own, and the state it gives.
+    /// Listed highest first, the same order as `resolve`.
+    fn rungs() -> [(Inputs, IslandState); 8] {
         use IslandState::*;
-        #[rustfmt::skip]
-        let table = [
-            (false, false, false, false, false, false, Idle),
-            (false, false, false, true , false, false, Tucked),
-            (false, false, true , false, false, false, Hidden),
-            (false, false, true , true , false, false, Hidden),
-            (false, true , false, false, false, false, Active),
-            (false, true , false, true , false, false, Tucked),
-            (false, true , true , false, false, false, Hidden),
-            (false, true , true , true , false, false, Hidden),
-            (true , false, false, false, false, false, Expanded),
-            (true , false, false, true , false, false, Expanded),
-            (true , false, true , false, false, false, Hidden),
-            (true , false, true , true , false, false, Hidden),
-            (true , true , false, false, false, false, Expanded),
-            (true , true , false, true , false, false, Expanded),
-            (true , true , true , false, false, false, Hidden),
-            (true , true , true , true , false, false, Hidden),
-            (false, false, false, false, false, true , Hud),
-            (false, false, false, true , false, true , Hud),
-            (false, false, true , false, false, true , Hidden),
-            (false, false, true , true , false, true , Hidden),
-            (false, true , false, false, false, true , Hud),
-            (false, true , false, true , false, true , Hud),
-            (false, true , true , false, false, true , Hidden),
-            (false, true , true , true , false, true , Hidden),
-            (true , false, false, false, false, true , Expanded),
-            (true , false, false, true , false, true , Expanded),
-            (true , false, true , false, false, true , Hidden),
-            (true , false, true , true , false, true , Hidden),
-            (true , true , false, false, false, true , Expanded),
-            (true , true , false, true , false, true , Expanded),
-            (true , true , true , false, false, true , Hidden),
-            (true , true , true , true , false, true , Hidden),
-            (false, false, false, false, true , false, Idle),
-            (false, false, false, true , true , false, Tucked),
-            (false, false, true , false, true , false, Hidden),
-            (false, false, true , true , true , false, Hidden),
-            (false, true , false, false, true , false, Active),
-            (false, true , false, true , true , false, Tucked),
-            (false, true , true , false, true , false, Hidden),
-            (false, true , true , true , true , false, Hidden),
-            (true , false, false, false, true , false, Lyrics),
-            (true , false, false, true , true , false, Lyrics),
-            (true , false, true , false, true , false, Hidden),
-            (true , false, true , true , true , false, Hidden),
-            (true , true , false, false, true , false, Lyrics),
-            (true , true , false, true , true , false, Lyrics),
-            (true , true , true , false, true , false, Hidden),
-            (true , true , true , true , true , false, Hidden),
-            (false, false, false, false, true , true , Hud),
-            (false, false, false, true , true , true , Hud),
-            (false, false, true , false, true , true , Hidden),
-            (false, false, true , true , true , true , Hidden),
-            (false, true , false, false, true , true , Hud),
-            (false, true , false, true , true , true , Hud),
-            (false, true , true , false, true , true , Hidden),
-            (false, true , true , true , true , true , Hidden),
-            (true , false, false, false, true , true , Lyrics),
-            (true , false, false, true , true , true , Lyrics),
-            (true , false, true , false, true , true , Hidden),
-            (true , false, true , true , true , true , Hidden),
-            (true , true , false, false, true , true , Lyrics),
-            (true , true , false, true , true , true , Lyrics),
-            (true , true , true , false, true , true , Hidden),
-            (true , true , true , true , true , true , Hidden),
-        ];
+        let base = Inputs::default();
+        [
+            (Inputs { fullscreen: true, ..base }, Hidden),
+            (Inputs { alert: true, ..base }, Alert),
+            (
+                Inputs { hovered: true, wide: true, ..base },
+                Lyrics,
+            ),
+            (Inputs { hovered: true, ..base }, Expanded),
+            (Inputs { transient: true, ..base }, Hud),
+            (Inputs { covered: true, ..base }, Tucked),
+            (Inputs { activity: true, ..base }, Activity),
+            (Inputs { media_playing: true, ..base }, Active),
+        ]
+    }
 
-        for (hovered, media, fullscreen, covered, wide, transient, expected) in table {
-            assert_eq!(
-                resolve(hovered, media, fullscreen, covered, wide, transient),
-                expected,
-                "hovered={hovered} media={media} fullscreen={fullscreen} covered={covered} wide={wide} transient={transient}"
-            );
+    fn union(a: Inputs, b: Inputs) -> Inputs {
+        Inputs {
+            hovered: a.hovered || b.hovered,
+            media_playing: a.media_playing || b.media_playing,
+            fullscreen: a.fullscreen || b.fullscreen,
+            covered: a.covered || b.covered,
+            wide: a.wide || b.wide,
+            transient: a.transient || b.transient,
+            activity: a.activity || b.activity,
+            alert: a.alert || b.alert,
+        }
+    }
+
+    #[test]
+    fn each_rung_alone_gives_its_state_and_nothing_is_idle_by_accident() {
+        assert_eq!(resolve(Inputs::default()), IslandState::Idle);
+        for (inputs, expected) in rungs() {
+            assert_eq!(resolve(inputs), expected, "{inputs:?}");
+        }
+    }
+
+    /// Whenever two rungs are on together, the higher one wins. Checks all 28 pairs.
+    #[test]
+    fn a_higher_rung_always_beats_a_lower_one() {
+        let rungs = rungs();
+        for (i, (high, expected)) in rungs.iter().enumerate() {
+            for (low, _) in &rungs[i + 1..] {
+                assert_eq!(
+                    resolve(union(*high, *low)),
+                    *expected,
+                    "high {high:?} against low {low:?}"
+                );
+            }
         }
     }
 
@@ -331,8 +352,65 @@ mod tests {
         machine.set_covered(true);
         machine.set_wide(true);
         machine.set_transient(true);
+        machine.set_activity(Some(ActivityKind::Timer));
+        machine.set_alert(Some(ActivityKind::Timer));
         machine.set_fullscreen(true);
         assert_eq!(machine.current(), IslandState::Hidden);
+    }
+
+    /// A running timer takes the compact pill from the media pill, and gives it back when it ends.
+    #[test]
+    fn activity_takes_the_compact_pill_from_media() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_media_playing(true);
+        machine.set_activity(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Activity);
+
+        machine.set_activity(None);
+        assert_eq!(machine.current(), IslandState::Active);
+    }
+
+    #[test]
+    fn hover_expands_the_activity_pill_and_a_covering_window_tucks_it() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_activity(Some(ActivityKind::Timer));
+        machine.set_hovered(true);
+        assert_eq!(machine.current(), IslandState::Expanded);
+
+        machine.set_hovered(false);
+        machine.set_covered(true);
+        assert_eq!(machine.current(), IslandState::Tucked);
+    }
+
+    /// The alert card holds over hover, so its buttons stay put, and it still gives way to
+    /// fullscreen. It shows over a tucked notch, as the HUD does.
+    #[test]
+    fn alert_outranks_hover_and_the_hud_but_not_fullscreen() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_hovered(true);
+        machine.set_transient(true);
+        machine.set_alert(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Alert);
+
+        machine.set_covered(true);
+        assert_eq!(machine.current(), IslandState::Alert);
+
+        machine.set_fullscreen(true);
+        assert_eq!(machine.current(), IslandState::Hidden);
+    }
+
+    #[test]
+    fn clearing_the_alert_returns_to_the_activity_or_hover() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_activity(Some(ActivityKind::Timer));
+        machine.set_alert(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Alert);
+
+        machine.set_alert(None);
+        assert_eq!(machine.current(), IslandState::Activity);
+
+        machine.set_hovered(true);
+        assert_eq!(machine.current(), IslandState::Expanded);
     }
 
     /// The window is 240 px tall (tauri.conf.json). The expanded pill, with its pager row, must
@@ -358,6 +436,16 @@ mod tests {
         let (w, h) = IslandState::Hud.pill_size();
         assert_eq!((w, h), (260.0, 30.0));
         assert!(w <= 720.0 && h <= 240.0);
+    }
+
+    #[test]
+    fn activity_and_alert_fit_the_window() {
+        assert_eq!(IslandState::Activity.pill_size(), (220.0, 30.0));
+        assert_eq!(IslandState::Alert.pill_size(), (320.0, 64.0));
+        for state in [IslandState::Activity, IslandState::Alert] {
+            let (w, h) = state.pill_size();
+            assert!(w <= 720.0 && h <= 240.0, "{state:?} is {w} x {h}");
+        }
     }
 
     #[test]
