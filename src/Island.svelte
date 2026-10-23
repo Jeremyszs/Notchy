@@ -84,9 +84,19 @@
     const key = `${weight}|${px}|${text}`;
     let width = measured.get(key);
     if (width === undefined) {
-      measureContext.font = `${weight} ${px}px ${family}`;
+      const face = `${weight} ${px}px ${family}`;
+      measureContext.font = face;
       width = measureContext.measureText(text).width;
-      measured.set(key, width);
+      // A bundled face that has not loaded yet measures in the fallback font. Such a width is not
+      // kept: the face is loaded, and the fit runs again with the real widths.
+      if (document.fonts.check(face)) {
+        measured.set(key, width);
+      } else {
+        void document.fonts.load(face).then(
+          () => (fontReady += 1),
+          () => {},
+        );
+      }
     }
     return width;
   }
@@ -1451,11 +1461,15 @@
      stays centred at the bottom. The body is 224 px tall, less the 14 px safe zone, the 8 px gap
      above the pager and the 24 px pager row, which leaves 178 px for the columns. The side
      insets match the expanded panel's 16 px. */
+  /* The body clips at its own box. The fit keeps every line inside it, so this only matters for a line
+     longer than the largest notch can hold at the text floor. Such a line is cut at the notch's edge
+     and never drawn outside it. */
   .wide {
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
     padding: 14px 16px 0;
+    overflow: hidden;
   }
 
   .wide-body {
@@ -1494,13 +1508,16 @@
     gap: 8px;
   }
 
-  /* Two lines at most. A long title wraps rather than cutting off after one line. */
+  /* Two lines at most, and a word too long for the column breaks by character, so the second line
+     ends in an ellipsis instead of the word running out of the box. The column is fixed at 150 px,
+     so a title never widens the notch (see DESIGN.md, section 3.3). */
   .heading {
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    overflow-wrap: anywhere;
     font-size: 24px;
     font-weight: 600;
     line-height: 28px;
@@ -1535,10 +1552,13 @@
     margin: 0;
   }
 
+  /* Weight 400 is what lib/lyricsFit.ts measures. The content's 500 would be wider, and a row that
+     wraps one word more than the fit counted pushes the stack past the notch. */
   .stack .ctx {
     min-height: calc(26px * var(--ls, 1));
     overflow-wrap: anywhere;
     font-size: calc(21px * var(--ls, 1));
+    font-weight: 400;
     line-height: calc(26px * var(--ls, 1));
     color: rgba(255, 255, 255, 0.4);
   }

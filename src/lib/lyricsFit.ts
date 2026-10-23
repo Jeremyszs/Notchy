@@ -33,32 +33,86 @@ export const DEFAULT_FIT: Readonly<LyricsFit> = Object.freeze({ w: MIN_W, h: MIN
 const SCALE_STEPS = [0.95, 0.9, 0.85, 0.8, 0.75, 0.7];
 const SCALE_FLOOR = 0.7;
 
-/** How many rows a text takes at a width, wrapping at spaces and, for a longer word, by character. */
-function countRows(text: string, px: number, weight: number, width: number, measure: Measure): number {
-  const words = text.split(/\s+/).filter((word) => word.length > 0);
-  if (words.length === 0) return 1;
+/**
+ * The column's width is less this many px when a line is counted. The browser wraps the real text, and
+ * a line that is exactly as wide as the column can wrap one word more than the measure says. Counting
+ * with a few px to spare keeps the stack inside the body (measured: an exact fit left 0 px of slack).
+ */
+export const WRAP_SAFETY_PX = 4;
+
+// Characters a line may break after without a space: CJK, kana, hangul and fullwidth forms.
+const BREAKS_WITHOUT_SPACE = /[\u2e80-\u303f\u3040-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/;
+
+type Token = { text: string; spaceBefore: boolean };
+
+/**
+ * Splits a text into the pieces the browser may wrap between: space-separated words, and each CJK
+ * character on its own. A piece remembers whether a space came before it, since a row that breaks
+ * there drops the space.
+ */
+function tokenize(text: string): Token[] {
+  const tokens: Token[] = [];
+  let space = false;
+  let word = "";
+  let wordSpace = false;
+  for (const ch of text) {
+    if (/\s/.test(ch)) {
+      if (word) tokens.push({ text: word, spaceBefore: wordSpace });
+      word = "";
+      space = true;
+    } else if (BREAKS_WITHOUT_SPACE.test(ch)) {
+      if (word) tokens.push({ text: word, spaceBefore: wordSpace });
+      word = "";
+      tokens.push({ text: ch, spaceBefore: space });
+      space = false;
+    } else {
+      if (!word) {
+        wordSpace = space;
+        space = false;
+      }
+      word += ch;
+    }
+  }
+  if (word) tokens.push({ text: word, spaceBefore: wordSpace });
+  return tokens;
+}
+
+/**
+ * How many rows a text takes in a column of `width` px, after the safety margin. Pieces wrap as the
+ * browser wraps them: a piece that does not fit moves to a new row, and a piece wider than a row breaks
+ * between characters, filling each row in turn (overflow-wrap: anywhere). Exported for the tests.
+ */
+export function countRows(text: string, px: number, weight: number, width: number, measure: Measure): number {
+  const limit = width - WRAP_SAFETY_PX;
+  const tokens = tokenize(text);
+  if (tokens.length === 0) return 1;
   const space = measure(" ", px, weight);
   let rows = 1;
   let used = 0;
-  for (const word of words) {
-    const wordWidth = measure(word, px, weight);
-    const join = used > 0 ? space : 0;
-    if (used + join + wordWidth <= width) {
-      used += join + wordWidth;
+  for (const token of tokens) {
+    const pieceWidth = measure(token.text, px, weight);
+    const join = used > 0 && token.spaceBefore ? space : 0;
+    if (used + join + pieceWidth <= limit) {
+      used += join + pieceWidth;
       continue;
     }
     if (used > 0) {
       rows += 1;
       used = 0;
     }
-    if (wordWidth <= width) {
-      used = wordWidth;
+    if (pieceWidth <= limit) {
+      used = pieceWidth;
       continue;
     }
-    // A word wider than the column breaks by character (overflow-wrap: anywhere).
-    const full = Math.ceil(wordWidth / width);
-    rows += full - 1;
-    used = wordWidth - (full - 1) * width;
+    // Wider than a row: each row takes the characters that fit, and the next one starts when one does not.
+    for (const ch of token.text) {
+      const chWidth = measure(ch, px, weight);
+      if (used > 0 && used + chWidth > limit) {
+        rows += 1;
+        used = 0;
+      }
+      used += chWidth;
+    }
   }
   return rows;
 }

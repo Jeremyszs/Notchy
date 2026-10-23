@@ -144,11 +144,17 @@ y h .............................
   row (14 px), a 10 px gap and the transport (52 px): 174 px in all, centred in the 178 px body, so 2 px
   above and below at rest. The title is 24 / 28 at weight 600, two lines at most, and the artist is 17 / 24.
   The block spans the art's 88 px with a one-line title as well.
+- The title and artist never widen the notch. The text column is fixed at 150 px (250 less the art and
+  its gap), and a wider notch adds width only to the lyric stack, so no title can be shown whole by
+  widening it. A title wraps to two lines (a word too long for the column breaks by character) and its
+  second line ends in an ellipsis. The artist is one line with an ellipsis. Nothing is clipped mid-word.
 - The lyric stack (`.stack`) has the current line at 27 / 32 weight 600, in a box at least 64 px tall
   (two rows), and each context line at 21 / 26, 40% white, in a box at least 26 px tall, with 8 px
   gaps. Short lines give 132 px, centred: 23 px above and below.
-- Lines wrap whole. `overflow-wrap: anywhere` breaks a word longer than the column. Nothing is clipped,
-  and no ellipsis is drawn. `--ls` on `.content` scales the text, and it is 1 unless the fit needs less.
+- Lines wrap whole. `overflow-wrap: anywhere` breaks a word longer than the column, and each context
+  line is weight 400, the weight the fit counts. `--ls` on `.content` scales the text, and it is 1 unless
+  the fit needs less. The body (`.wide`) clips at its own box. The fit keeps every line inside that box,
+  so the clip only cuts a line that is too long even at the 0.7 floor (section 13).
 
 **Fit (`src/lib/lyricsFit.ts`).** The size is worked out for the track from all its lines, so it stays
 still while the lines change. The steps are in this order, and each one is the smallest that works:
@@ -157,12 +163,19 @@ still while the lines change. The steps are in this order, and each one is the s
 2. At 700 wide, grow the height to the body the lines need (up to 240).
 3. Only then scale the text: 0.95, 0.9 and so on down to a floor of 0.7.
 
-A line's rows are counted with the measured width of its words at the stack's text width. Words wrap at
-spaces, and a longer word breaks by character. A current line needs `(max(2, rows) * 32 + (prev + next)
+A line's rows are counted with the measured width of its pieces at the stack's text width, less a 4 px
+margin (`WRAP_SAFETY_PX`), because the browser wraps the real text and an exact fit left no slack. The
+pieces are the space-separated words, and each CJK character on its own. A piece that does not fit moves
+to a new row, and a piece wider than a row breaks by character, each row taking the characters that fit.
+The rows are counted at the weight the stack draws: 600 for the current line and 400 for context lines.
+A face that has not loaded yet is not cached. The fit runs again once it loads, so a font change never
+keeps a fallback width. A current line needs `(max(2, rows) * 32 + (prev + next)
 * 26) * scale + 16` px of body, where each neighbour counts at least one row, and the pill is that plus
-46. The size is the largest of these over the track's lines. In the browser harness a 97-character line
-at 700 wide wrapped onto three rows, and the pill was 700 x 230, with the 96 px current box holding all
-three rows (`.cur` and its text the same height).
+46. The size is the largest of these over the track's lines. In the browser harness, with Inter, a
+150-character line at the 0.8 scale took five rows and the pill was 700 x 232, with the stack inside the
+body (0.2 px spare). The row count was checked against the browser for 700 random lines (350 in Inter and
+350 in Playfair) in columns of 150 to 410 px, at text sizes 0.7 to 1 and weights 400 and 600. The count
+was never lower than the render. The count it replaced was lower for 11 of the same 700 lines.
 
 ### 3.4 Compact pills (30 px tall, 64 for alert)
 
@@ -550,6 +563,10 @@ Three round buttons: skip 44 px, play 52 px, glyphs 28 px and 32 px, 14 px gap, 
 | 13 | Svelte drops a space at the start of an element, so a title and body joined with `<span> {body}</span> ` ran together ("Lunch at noon?Bring"). | Emit a separator as its own expression, such as `{" "}`, not as a leading space inside a span. |
 | 14 | A form copied its seed once (`let form = {...seed}`), so a second "add" for another day, while the form was open, kept the first day. | When a child copies a prop at creation, remount it with `{#key}` on a counter that every open bumps. |
 | 15 | A class name the island already uses (`.frame`) matched the island's own wrapper in a test query, so the first measurements read the wrong box. | Give page elements their own class names, and measure the element you mean (check `.closest()` or the component). |
+| 16 | A lyric context line drew at weight 500 (inherited from `.content`), but the fit counted it at 400. A row the fit missed pushed the stack past the notch's edges. | Give each text the weight the fit counts. `.stack .ctx` is 400. |
+| 17 | A width measured before its web font loaded used the fallback font, and the cache kept it (measured: 757.5 px against 673.1 px for Playfair). | Measure only a loaded face. A face that is loading is not cached, and the fit runs again when it loads. |
+| 18 | Rows were counted as the width divided by the column, rounded up. A long CJK or unbroken word lost a row (11 of 700 lines in the harness). | Break a piece that is wider than a row character by character, as the browser wraps it. |
+| 19 | An exact fit left 0 px of slack, so one pixel of difference could change a row. | Count the columns 4 px narrower than the notch (`WRAP_SAFETY_PX`). |
 
 ## 9. Accessibility and reduced motion
 
@@ -663,8 +680,9 @@ changes.
   event firing at its start) are checked in `tauri dev`, not here.
 - The lyrics layout (title block, progress row, transport, lyric stack and the fit) was measured in the
   browser harness at rest and with a long line, and not in the Tauri window. A line too long for 700 x 240
-  even at the 0.7 floor does not fit: a 300-character line needs about eight rows there, and it overlaps
-  its neighbours rather than clipping. That is the limit of the rule, not a bug to hide.
+  even at the 0.7 floor does not fit: a 210-character CJK line takes 11 rows at 0.7, so it needs about
+  299 px of body (a pill of about 345 px), against the 194 px there is. The body clips it at its own edge, so the first line is cut at the notch's top and
+  nothing is drawn outside the notch. That is the limit of the rule, not a bug to hide.
 - The media progress line's seek, the calendar snooze strip, and the Settings form's length and reminder chips were
   not measured in the browser harness or in the Tauri window. Their sizes come from the code and this file, and
   the snooze strip's layout (a 102 px body, with the strip in the bottom 30 px) needs a check on a real screen.
