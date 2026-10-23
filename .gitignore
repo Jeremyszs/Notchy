@@ -13,3 +13,4 @@ vite.config.ts.timestamp-*
 # Local assistant notes and caches
 .remember/
 .impeccable/hook.cache.json
+.claude/

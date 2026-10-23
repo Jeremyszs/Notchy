@@ -36,6 +36,7 @@ largest pill is the lyrics layout.
 | `hud` | 260 x 30 | 10 | 15 | same |
 | `notification` (another app's toast) | 260 x 30 | 10 | 15 | same |
 | `battery` (charger, full, low battery) | 260 x 30 | 10 | 15 | same |
+| `calendar` (event reminder) | 260 x 30 | 10 | 15 | same |
 | `alert` (timer finished) | 320 x 64 | 10 | 24 | same |
 | `expanded` (panel) | 380 x 192 | 10 | 24 | same |
 | `lyrics` (wide panel) | 620 x 224 | 10 | 24 | same |
@@ -107,6 +108,7 @@ Measured in the shipped build (gap above / gap below the content block, px):
 | Timer, stopwatch with 7 laps (list scrolls) | 0 | 0 | 116 |
 | Timer, pomodoro (focus, break, paused, done) | 9 | 9 | 98 |
 | Wi-Fi and Bluetooth sub-views | header on top edge, footer on bottom edge | | 146 |
+| Calendar (month grid and notes) | 3 | 3 | 140 |
 
 The timer rows in this table are measured against the lower area (116 px, top at y 30), below the
 docked selector. The selector itself is measured at y 14, 24 px tall, x 94.8 from the panel's left
@@ -190,6 +192,7 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | 13 | 600 | Activity digits (`.clock-slot`), tabular |
 | 12 / 16 | 500 | Active pill title (`.active-title`) |
 | 12 / 16 | 600 and 400 | Battery pill: the word (600, 90% white) and the level (400, 60% white, tabular) |
+| 22 / 26 | 600 | Stats tile figure (`.value`, tabular, a fixed 26 px line box) |
 | 12 | 600 | Pills and chips, HUD value, stepper value, idle clock, section heading |
 | 12 | 400 | Panel artist (60% white), network names |
 | 11 / 14 | 400 | Notices, alert sub-line, lyric source line |
@@ -197,6 +200,19 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | 11 / 16 | 400 | Timer laps, pomodoro cycle line |
 | 11 | 600 | Timer mode tabs |
 | 10 / 12 | 400 | Quick-control tile names, network state and links |
+| 11 / 16 | 500 and 600 | Calendar page day numbers (tabular, 90% white), and a note's time (600, 60% white) |
+| 11 / 12 | 600 | Calendar page weekday initials, 55% white |
+| 12 / 18 and 12 / 24 | 600 and 500 | Calendar page selected date and "Add note" (600), and a note's title (500, 90% white) |
+| 12 / 16 | 600 and 400 | Calendar reminder pill: the title (600, 90% white) and "in N min" (400, 60% white, tabular) |
+| 13 / 18 | 600 | Calendar page month title, between the two arrows |
+| 13 / 16 | 400 | Calendar page "No notes", centred at 55% white |
+| 15 / 20 | 600 | Settings month title (`.title`), 160 px box, centred between the arrows |
+| 14 / 17 | 600 | Settings month day heading (`.day-title`), 90% white |
+| 14 / 14 | 500, 600 when coloured or selected | Settings month day numbers (`.day`), tabular, in a 36 px circle |
+| 11 / normal | 600 | Settings month weekday labels, 55% white |
+| 13 / 16 | 600 | Settings month "Today" button |
+| 15 / 20 | 400 | Settings note title, and 600 for "Add note" and Save |
+| 13 / 18 | 400 | Settings note time and notes line (55% white); status line (red, #FF453A) |
 
 - **Tabular numbers.** Every number that changes while shown uses `font-variant-numeric: tabular-nums`
   (digits, activity clock, HUD value, idle clock, stepper value). `RollingClock` lays each digit in a
@@ -231,6 +247,17 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Volume (HUD) | `#7DD3FC` | `#FFFFFF` | ice |
 | Brightness (HUD and icon) | `#FFD166` | `#FFF3C4` | amber |
 | Mute slash | `#FF6B6B` | | HUD and quick-control icons |
+| Stats CPU | `#0A84FF` | | sparkline stroke only. Text stays white |
+| Stats memory | `#BF5AF2` | | sparkline stroke only |
+| Stats network (down) | `#30D158` | | sparkline stroke only |
+| Stats disk | `#FF9F0A` | | sparkline stroke only |
+| Calendar reminder | `#FF6A3D` | | the calendar glyph only (a stroke). The text stays white |
+| Settings month, day with notes | `#FF6A3D` at 22% fill | | the day number in `#FF6A3D` (4.8:1 on `#111`) |
+| Settings month, selected day | `#FF6A3D` | | solid circle, black number (7.4:1) |
+| Settings month, "Add note" and Save | `#FF6A3D` | | link text (18.9:1 on `#111`), Save is solid with white text |
+| Island calendar page, day with notes | `#FF6A3D` at 22% fill | | the day number in `#FF6A3D` (about 5.7:1 on that fill, computed) |
+| Island calendar page, selected day | `#FF6A3D` | | solid disc, black number (7.4:1) |
+| Island calendar page, "Add note" | `#FF6A3D` | | link text (7.4:1 on `#000`) |
 
 - **Accent use.** An accent fills a ring, a strong pill, a filled pomodoro session, or the glow. It is
   never used for body text. A filled session dot is the accent at 100%, an empty one is the accent at
@@ -257,6 +284,7 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Lyrics tint crossfade | 400 ms | | opacity |
 | HUD bar | 120 ms | ease-out | transform scaleX |
 | Battery glyph fill | 320 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform scaleX, origin left |
+| Calendar reminder text change | 200 ms in, 120 ms out | ease | opacity (keyed on the reminder's `seq`) |
 | Battery text change | 200 ms in, 120 ms out | ease | opacity (keyed on the event) |
 | HUD icon | 160 ms in, 110 ms out | | opacity |
 | Notification text change | 200 ms in, 120 ms out (fade, and the outgoing text stays in the same cell) | ease | opacity |
@@ -271,6 +299,8 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Press feedback on tiles | 120 ms | ease | transform scale 0.94, opacity 0.7 |
 | Armed lock tile | | | transform scale 1.1, outline 2 px |
 | Spinner and pulse | 800 ms linear; 1200 ms ease-in-out | | transform, opacity |
+| Settings month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform and opacity. Reduced motion: a 150 ms fade, no slide |
+| Island calendar month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | cubic-out (Svelte `fly`) | transform and opacity. Reduced motion: a 150 ms fade, no slide |
 
 Rules:
 
@@ -350,6 +380,96 @@ up, the notification keeps its own timer, so a message can expire unseen under i
 HUD. Hover and fullscreen hide it as they hide the HUD. Only one pill is on screen. A newer event
 replaces it and restarts its time. Charger and full pills hold 3 s, and low-battery warnings hold 5 s.
 
+### Stats page
+`StatsPage.svelte` fills the 146 px page box with a 2 x 2 grid (8 px gap, so each tile is 170 x 69).
+Each tile is a 12 px radius at 8% white, with a 12 px label row (11 px, 60% white, and an optional
+55% detail on the right), the 22 px figure with its unit (12 px, 600, 60% white), and a 14 px
+sparkline of the last 30 readings, drawn with `vector-effect: non-scaling-stroke` at 1.5 px. The
+figure's digits roll through `RollingClock`, and the unit stays put. The units are KB/s, MB/s and
+GB/s (one decimal above KB/s), and a missing reading shows an en dash. A tile's content is centred
+with 4.5 px above and below. The sampler runs only while the expanded panel is open on this page
+(`watchStats` in `src/stores/stats.ts`). It reads at 1 s, and the first reading has no rates.
+
+### Calendar reminder pill
+A 260 x 30 pill, shown as `IslandState::Calendar` (`state.rs`). A 16 px calendar glyph in the calendar
+accent (#FF6A3D, a 1.5 px stroke), then the event title and "in N min" or "now". The glyph, title and
+time are one group, centred with `justify-content: center` and 8 px gaps, as the battery pill is. The
+title shortens with an ellipsis, and the time never shrinks. Measured at 0.75 zoom: the group's centre
+is within 0.01 px of the pill's centre, the left and right gaps are equal, and the glyph and text are
+centred vertically (0 px). The pill takes no clicks.
+
+Precedence: a reminder sits under the battery pill, the HUD and the timer alert, and over a notification,
+so a toast from another app never hides it. It is held for 6 s (a lead-time reminder) or 8 s (the start,
+or an all-day reminder). Reminders queue one at a time, the way notifications do, up to five waiting.
+
+### Calendar page (island)
+The Calendar page (`src/CalendarPage.svelte`) shows the month on the left and the selected day's notes
+on the right, in the 146 px page box. One CSS grid holds both columns, so they share rows. The block is
+140 px tall, which leaves 3 px above and 3 px below in the box. Its width is 348 px, the content box.
+
+| Part | Size (px) |
+| --- | --- |
+| Month column | 182 wide: seven 26 px columns |
+| Divider | 1 px wide, 140 tall, 12 px from the grid and 12 px from the notes |
+| Notes column | 141 wide |
+| Heading row (month title and arrows; the date and "Add note") | 18 tall |
+| Gap, weekday row, gap | 4, 12, 4 |
+| Day rows | six 17 px rows, 102 in all. Always six, so the page never changes height |
+| Arrow buttons | 24 x 18 each, so the title centres between them |
+| Day hit area | the whole 26 x 17 cell. The number is a 16 px disc inside it |
+| Notes body | 102 tall, the height of the six day rows, with the content centred in it |
+| Note row | 24 tall. Up to four rows: the notes, or three notes and a "+N more" row |
+
+Text: the month title 13 / 18 600 (100% white). Weekday initials 11 / 12 600 at 55%. Day numbers 11 / 16
+500, tabular, at 90% (40% outside the month). The selected date 12 / 18 600 at 90%, and "Add note" 12 / 18
+600 in the accent. A note's time 11 / 16 600, tabular, at 60%. Its title 12 / 24 500 at 90%, one line
+with an ellipsis. "+N more" 12 / 24 at 55%. "No notes" 13 / 16 at 55%, centred.
+
+Colour: a day with notes is the accent at 22% with accent text. The selected day is a solid accent disc
+with a black number. Today is a 1 px inset ring at 55%, unless it is selected. A day can be both.
+
+Measured in the browser harness (720 x 240 viewport, expanded panel, px at 1x):
+- Page box 146 (y 14 to 160). The 140 px block is 3 above and 3 below.
+- Title centre minus the centre of the arrow row: 0. Title centred between the arrows: 0.
+- Each weekday label's centre minus the centre of the day under it: 0, in all seven columns.
+- Divider gaps 12 / 12. The notes body's top and bottom match the day rows' top and bottom (0 / 0).
+  "Add note" is flush with the notes column's right edge, and the date row is level with the arrows.
+- Four note rows (six notes): 3 / 3. Rows measured 24 each. No element overflows.
+- Days checked: no notes ("No notes" centred), one note (a single all-day row), three notes (rows with
+  an ellipsis on a 38-character title) and six notes ("+3 more"). Months checked: October 2026 (six rows),
+  February 2026 (the last two rows are March), and December 2026 to January 2027 (the year end, with a
+  coloured 31 December).
+
+Behaviour:
+- A click selects a day, and the month follows it (a click on a day from the next month moves there).
+  The arrows move one month and keep the day, clamped to the month's length. The wheel only turns pages.
+- The grid refreshes when the event list changes (`calendar://update`), and on a month change. The
+  refresh keeps the same nodes, so it does not blink. Opening the panel selects today.
+- A month change is a 220 ms slide of 16 px with a fade, and the old month fades in 120 ms. Reduced
+  motion is a 150 ms fade with no slide. Only `transform` and `opacity` animate.
+- "Add note" calls `settings_open_calendar(date)`. It opens Settings on that day with the add form. A
+  window that is already open gets the `calendar://add-note` event. A window built for it takes the day
+  once when it loads (`calendar_take_add_date`). The island cannot take text, so Settings does the typing.
+
+Clicks are hit-tested by the pill's size like the Controls tiles. The clicks were driven in the browser
+harness, not in the Tauri window (see section 13).
+
+### Calendar month (Settings)
+`CalendarMonth.svelte` is the Calendar section of Settings. A month grid sits in a card above a panel for the selected day. The card's side padding is the group padding (16 px), so the grid lines up with the rows of the groups above and below.
+
+Measured in the browser harness at a 560 px window (the Settings minimum). The card is 512 px wide, and the grid is inset 16 px on each side.
+
+- **Header.** A 32 px bar in a `1fr auto 1fr` grid. The middle is two 32 px arrows around a 160 px title box, so the title is centred between them (measured within 0.01 px of the arrows' midpoint) and nothing moves when the month name changes width. "Today" sits at the right end.
+- **Weekdays.** A 24 px row, 8 px under the bar. Labels start on the first day of the week for the PC's language (`Intl.Locale.getWeekInfo`, Monday when unknown): Sunday in en-US, Monday in en-GB.
+- **Grid.** A 240 px frame, always six rows of 40 px, so the card is the same height in every month. Seven equal columns of `(card - 32) / 7`, which is 68.56 px at 512 px. A weekday's centre and the centre of the day under it agree within 0.01 px.
+- **Day.** A 36 px round button centred in its 40 px cell. Days outside the month are 40% white. A day with notes is the accent at 22% with accent text. The selected day is solid, with a black number at weight 600: black on `#FF6A3D` is 7.4:1, where white would be 2.85:1, below the 4.5:1 for small text. Today has a 1.5 px inset ring at 55% white, unless it is selected.
+- **Panel.** A 44 px heading with the full date. A note row is at least 56 px: the title (15 px), a time line with the repeat word (13 px, 55%), an optional notes line (13 px, 55%, one line), and Edit and Delete as 32 px buttons. Delete keeps its confirm step. An empty day shows "No notes" in a 56 px row, then the 44 px "Add note" row.
+- **Form.** The rows of the Settings groups: 12 px by 16 px fields, 8% white hairlines. Adding shows the selected date as a label. Editing shows a date input, and a repeating note says that every occurrence changes. The start time is the next full hour.
+- **Keyboard.** The grid has the grid role and a roving tab stop on the selected day. Arrow keys move the selection a day or a week, Home and End move to the ends of the week, and PageUp and PageDown move a month and keep the day (clamped to the month's length). Focus follows the selection. Each day's label is the full date and its count, such as "Friday 23 October, 2 notes".
+- **Data.** The grid asks `calendar_between` for its six weeks. It asks again when the event list changes (`calendar://update`), and an answer that arrives late is dropped.
+
+Measured in the harness: 0 notes (2 October), 1 note (6 October), 4 notes (23 October, one of them the daily standup), the 240 px frame in every month opened (June, July, September, October 2026, February 2026 and February 2028), and February 2028 with its 29th coloured by the leap-day series and the clamped monthly rent. The narrow browser pane (355 px) is not a Settings size: there the add form's repeat select cuts "Does not repeat" short.
+
 ### Pager
 Row 16 px tall, 4 px gaps. Each dot is a 16 px hit area with a 5 px white dot at 35% opacity (100%
 when current). The row is centred, with 8 px under it.
@@ -374,6 +494,8 @@ Three round buttons: skip 60 px, play 68 px, glyphs 36 px and 40 px, 12 px gap, 
 | 11 | The timer's mode tabs moved up and down (15 to 34 px, 19 px) as each mode's content changed height, because the whole timer page was centred as one block. | Controls that switch modes are docked; only the content below adapts. Give that content the remaining height and centre it there (section 3.2). |
 | 12 | The notification text started at the badge's edge, with no gap between them. | Keep an 8 px gap between a compact pill's badge and its text column, and mirror it on the right so the text stays centred. |
 | 13 | Svelte drops a space at the start of an element, so a title and body joined with `<span> {body}</span> ` ran together ("Lunch at noon?Bring"). | Emit a separator as its own expression, such as `{" "}`, not as a leading space inside a span. |
+| 14 | A form copied its seed once (`let form = {...seed}`), so a second "add" for another day, while the form was open, kept the first day. | When a child copies a prop at creation, remount it with `{#key}` on a counter that every open bumps. |
+| 15 | A class name the island already uses (`.frame`) matched the island's own wrapper in a test query, so the first measurements read the wrong box. | Give page elements their own class names, and measure the element you mean (check `.closest()` or the component). |
 
 ## 9. Accessibility and reduced motion
 
@@ -402,7 +524,7 @@ has a row in `src/settings/Settings.svelte`.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| `pages` | media, controls, timer | Panel pages and their order. One page hides the pager. |
+| `pages` | media, controls, timer, stats | Panel pages and their order. One page hides the pager. Old files without `stats` keep the page off until it is turned on. |
 | `controls` | eight ids | Quick controls and their order (sliders first, at most seven tiles). |
 | `lyrics` | on | Synced lyrics layout. |
 | `confirmLock` | on | First tap arms Lock for 3 s. |
@@ -411,7 +533,9 @@ has a row in `src/settings/Settings.svelte`.
 | `notifications` (`enabled`, `deniedApps`) | on, no apps denied | Shows other apps' Windows toasts in the notification pill. Settings > Notifications lists the apps and turns each on or off. |
 | `idleClock` | on | Shows HH:MM, dim, in the idle pill. |
 | `battery` (`enabled`, `chargeAlerts`, `lowBatteryAlerts`) | on, on, on | Shows the battery pill for the charger, full charge and low-battery warnings. Settings > Battery. A PC with no battery shows nothing. |
+| `stats` (`enabled`) | on | Lets the Stats page show and be sampled. Settings > Stats. Off, the page is hidden and nothing is read. |
 | `focusMinutes`, `shortBreakMinutes`, `longBreakMinutes` | 25, 5, 15 | Pomodoro lengths. |
+| `calendar` (`enabled`, `leadMinutes`, `allDayHour`) | on, 10, 9 | Reminders for the user's own events, and the Calendar page. Settings > Calendar sets the lead time (5, 10, 15, 30 or 60 min) and the hour all-day events are announced at. Events themselves are in `events.json`. Settings is the only place to change them: the island's Calendar page opens it for "Add note". |
 
 Decision on the idle clock: the idle pill is the only moment the notch is not doing something, so
 it is the one place a glance at the time costs nothing. A 12 px, 55% white `HH:MM` fits inside the
@@ -470,6 +594,8 @@ changes.
 
 ## 13. Known limits
 
+- The Stats page shows CPU, memory, network and the system drive only. CPU temperature and GPU
+  are not shown: no reliable reading comes without admin rights or a vendor driver.
 - The real Tauri window is not part of the browser harness. Click-through, the window's placement and
   the Settings window's appearance are checked in `tauri dev`.
 - The notification pill takes the cursor like the HUD does, because the window hit-tests every pill
@@ -477,5 +603,18 @@ changes.
   does nothing. The pill never shows an icon, only the app's initial.
 - The battery pill was checked in the browser harness, which drives the `battery://show` and
   `island://state` events. A real plug or unplug on the Tauri window is not checked.
+- The calendar reminder pill and page were checked in the browser harness, which drives
+  `calendar://show`, `calendar://update` and `island://state`. The reminder times themselves (a real
+  event firing at its start) are checked in `tauri dev`, not here.
+- The island month grid was checked in the browser harness only. The harness clicked the days and the
+  arrows, and its "Add note" recorded the call. Not checked in the Tauri window: real pointer hits through
+  the notch, the Settings window opening and scrolling to the calendar on a click, and whether the island
+  collapses while Settings takes focus.
+- The idle clock has no calendar line. An event within the hour would need the idle pill to show a
+  second line or a wider chip, which would break the centring and the size in section 10, so it was
+  left out.
 - Timer digits are measured by line box, not by ink. A font with a tall or short cap height can look
   a pixel off-centre. Adjust `line-height` on the element, not the padding, if that happens.
+- The Settings month grid was checked in the browser harness only, at 355 and 560 px. Its reduced-motion
+  branch is not exercised there, because the harness cannot set `prefers-reduced-motion`. A day with several
+  notes shows a colour and no count, so the brief's optional dot count is not drawn.

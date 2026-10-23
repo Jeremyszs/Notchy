@@ -2,12 +2,14 @@ import { derived, get, writable } from "svelte/store";
 import { mediaState } from "./media";
 import { config } from "./config";
 
-export type Page = "media" | "controls" | "timer";
+export type Page = "media" | "controls" | "timer" | "stats" | "calendar";
 
 export const PAGE_LABELS: Record<Page, string> = {
   media: "Media",
   controls: "Controls",
   timer: "Timer",
+  stats: "Stats",
+  calendar: "Calendar",
 };
 
 // A page the user left this recently is the one they get back when the panel reopens.
@@ -31,9 +33,12 @@ function isPage(id: string): id is Page {
 }
 
 // Pages the pager cycles through, in order, from the settings. With one page enabled, the pager
-// is hidden.
+// is hidden. The Stats and Calendar pages also need their own switches on.
 export const enabledPages = derived(config, ($config) =>
-  $config.pages.filter(isPage),
+  $config.pages
+    .filter(isPage)
+    .filter((id) => id !== "stats" || $config.stats.enabled)
+    .filter((id) => id !== "calendar" || $config.calendar.enabled),
 );
 
 export const page = writable<Page>("media");

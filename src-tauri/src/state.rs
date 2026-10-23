@@ -29,6 +29,9 @@ pub enum IslandState {
     /// A charger plugged in or out, a full charge, or a low battery. A transient like the HUD, shown
     /// above a notification. Its content travels on `battery://show`; this state only says it is on.
     Battery,
+    /// A reminder for a calendar event, shown for a few seconds. A transient like the battery pill.
+    /// Its content travels on `calendar://show`; this state only says it is on screen.
+    Calendar,
     /// An activity wants attention, such as a timer that just ran out. A card that holds for a
     /// few seconds, and stays until its owner clears the alert. Its content travels on the
     /// owner's event.
@@ -49,6 +52,7 @@ impl IslandState {
             Self::Hud => (260.0, 30.0),
             Self::Notification => (260.0, 30.0),
             Self::Battery => (260.0, 30.0),
+            Self::Calendar => (260.0, 30.0),
             Self::Alert => (320.0, 64.0),
             Self::Tucked => (64.0, 5.0),
             Self::Hidden => (0.0, 0.0),
@@ -73,6 +77,7 @@ pub struct Inputs {
     pub wide: bool,
     pub transient: bool,
     pub battery: bool,
+    pub calendar: bool,
     pub notification: bool,
     pub activity: bool,
     pub alert: bool,
@@ -89,11 +94,14 @@ pub struct Inputs {
 /// 5. A battery pill (charger, full, low battery) shows under the HUD and over a notification. It
 ///    is a short, physical event the user just caused, so it is not left waiting behind a message.
 ///    A notification that lands meanwhile keeps its own timer and shows once the pill gives way.
-/// 6. A notification shows under the HUD, so a volume or brightness change is never hidden by a
+/// 6. A calendar reminder shows under the battery pill and over a notification. It is a reminder
+///    the user asked for, so a toast from another app never hides it. It holds for 6 to 8 s, and a
+///    reminder that lands meanwhile waits its turn in its own queue.
+/// 7. A notification shows under the HUD, so a volume or brightness change is never hidden by a
 ///    message. Like the HUD, it shows over a covered notch.
-/// 7. A covered notch tucks, even while an activity runs.
-/// 8. A live activity owns the compact pill, in place of media.
-/// 9. Media shows the active pill, and otherwise the island idles.
+/// 8. A covered notch tucks, even while an activity runs.
+/// 9. A live activity owns the compact pill, in place of media.
+/// 10. Media shows the active pill, and otherwise the island idles.
 pub fn resolve(inputs: Inputs) -> IslandState {
     if inputs.fullscreen {
         IslandState::Hidden
@@ -107,6 +115,8 @@ pub fn resolve(inputs: Inputs) -> IslandState {
         IslandState::Hud
     } else if inputs.battery {
         IslandState::Battery
+    } else if inputs.calendar {
+        IslandState::Calendar
     } else if inputs.notification {
         IslandState::Notification
     } else if inputs.covered {
@@ -129,6 +139,7 @@ pub struct IslandStateMachine {
     wide: bool,
     transient: bool,
     battery: bool,
+    calendar: bool,
     notification: bool,
     activity: Option<ActivityKind>,
     alert: Option<ActivityKind>,
@@ -144,6 +155,7 @@ impl IslandStateMachine {
             wide: self.wide,
             transient: self.transient,
             battery: self.battery,
+            calendar: self.calendar,
             notification: self.notification,
             activity: self.activity.is_some(),
             alert: self.alert.is_some(),
@@ -178,6 +190,11 @@ impl IslandStateMachine {
     /// Whether a battery pill is on screen. Owned by `modules::battery`.
     pub fn set_battery(&mut self, battery: bool) {
         self.battery = battery;
+    }
+
+    /// Whether a calendar reminder is on screen. Owned by `modules::calendar`.
+    pub fn set_calendar(&mut self, calendar: bool) {
+        self.calendar = calendar;
     }
 
     /// Whether a notification is on screen. Owned by `modules::notifications`.
@@ -236,7 +253,7 @@ mod tests {
 
     /// Each precedence rung as the inputs that trigger it on their own, and the state it gives.
     /// Listed highest first, the same order as `resolve`.
-    fn rungs() -> [(Inputs, IslandState); 10] {
+    fn rungs() -> [(Inputs, IslandState); 11] {
         use IslandState::*;
         let base = Inputs::default();
         [
@@ -249,6 +266,7 @@ mod tests {
             (Inputs { hovered: true, ..base }, Expanded),
             (Inputs { transient: true, ..base }, Hud),
             (Inputs { battery: true, ..base }, Battery),
+            (Inputs { calendar: true, ..base }, Calendar),
             (Inputs { notification: true, ..base }, Notification),
             (Inputs { covered: true, ..base }, Tucked),
             (Inputs { activity: true, ..base }, Activity),
@@ -265,6 +283,7 @@ mod tests {
             wide: a.wide || b.wide,
             transient: a.transient || b.transient,
             battery: a.battery || b.battery,
+            calendar: a.calendar || b.calendar,
             notification: a.notification || b.notification,
             activity: a.activity || b.activity,
             alert: a.alert || b.alert,
@@ -279,7 +298,7 @@ mod tests {
         }
     }
 
-    /// Whenever two rungs are on together, the higher one wins. Checks all 36 pairs.
+    /// Whenever two rungs are on together, the higher one wins. Checks all 55 pairs.
     #[test]
     fn a_higher_rung_always_beats_a_lower_one() {
         let rungs = rungs();
@@ -391,11 +410,71 @@ mod tests {
         machine.set_wide(true);
         machine.set_transient(true);
         machine.set_battery(true);
+        machine.set_calendar(true);
         machine.set_notification(true);
         machine.set_activity(Some(ActivityKind::Timer));
         machine.set_alert(Some(ActivityKind::Timer));
         machine.set_fullscreen(true);
         assert_eq!(machine.current(), IslandState::Hidden);
+    }
+
+    /// A calendar reminder shows over a tucked or playing island and gives way when it ends.
+    #[test]
+    fn calendar_shows_over_tucked_and_active_then_returns() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_covered(true);
+        machine.set_media_playing(true);
+        machine.set_calendar(true);
+        assert_eq!(machine.current(), IslandState::Calendar);
+
+        machine.set_calendar(false);
+        assert_eq!(machine.current(), IslandState::Tucked);
+    }
+
+    /// The reminder sits under the battery pill, the HUD and the alert, and over a notification.
+    /// Hover wins over it.
+    #[test]
+    fn calendar_yields_to_alert_hud_battery_and_hover_but_beats_a_notification() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_notification(true);
+        machine.set_calendar(true);
+        assert_eq!(machine.current(), IslandState::Calendar);
+
+        machine.set_battery(true);
+        assert_eq!(machine.current(), IslandState::Battery);
+        machine.set_battery(false);
+
+        machine.set_transient(true);
+        assert_eq!(machine.current(), IslandState::Hud);
+        machine.set_transient(false);
+
+        machine.set_activity(Some(ActivityKind::Timer));
+        machine.set_alert(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Alert);
+        machine.set_alert(None);
+
+        machine.set_hovered(true);
+        assert_eq!(machine.current(), IslandState::Expanded);
+        machine.set_hovered(false);
+
+        machine.set_calendar(false);
+        assert_eq!(machine.current(), IslandState::Notification);
+    }
+
+    /// A timer alert outranks a reminder, so a finished countdown is never hidden by one.
+    #[test]
+    fn a_timer_alert_outranks_a_calendar_reminder() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_calendar(true);
+        machine.set_alert(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Alert);
+    }
+
+    #[test]
+    fn calendar_pill_is_compact_and_fits_the_window() {
+        assert_eq!(IslandState::Calendar.pill_size(), (260.0, 30.0));
+        let (w, h) = IslandState::Calendar.pill_size();
+        assert!(w <= 720.0 && h <= 240.0);
     }
 
     /// A notification shows over a tucked or playing island and gives way when it ends, as the HUD does.

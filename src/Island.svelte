@@ -20,14 +20,18 @@
   import { initialOf } from "./lib/notifications";
   import { battery } from "./stores/battery";
   import { batteryColor, batteryLabel, glyphFill, hasBolt, percentText } from "./lib/battery";
+  import { reminder } from "./stores/calendar";
+  import { relativeLabel } from "./lib/calendar";
   import { hudFill, hudIcon, hudLabel, type HudIcon } from "./lib/hud";
   import { activityLabel, alertCopy, cycleDots, palette, ringRotations } from "./lib/timer";
   import { lastFinish, timerState, timerView, addTime, dismissTimer } from "./stores/timer";
   import { config } from "./stores/config";
+  import CalendarPage from "./CalendarPage.svelte";
   import ControlsPage from "./ControlsPage.svelte";
   import IdleClock from "./IdleClock.svelte";
   import RollingClock from "./RollingClock.svelte";
   import TimerPage from "./TimerPage.svelte";
+  import StatsPage from "./StatsPage.svelte";
   import { fade, fly } from "svelte/transition";
   import { islandPath } from "./lib/shape";
   import { createWheelGesture } from "./lib/wheel";
@@ -48,6 +52,7 @@
     hud: { w: 260, h: 30, ear: 10 },
     notification: { w: 260, h: 30, ear: 10 },
     battery: { w: 260, h: 30, ear: 10 },
+    calendar: { w: 260, h: 30, ear: 10 },
     alert: { w: 320, h: 64, ear: 10 },
     expanded: { w: 380, h: 192, ear: 10 },
     lyrics: { w: 620, h: 224, ear: 10 },
@@ -510,6 +515,30 @@
   </div>
 
   <div
+    class="shape calendar"
+    class:on={$islandState === "calendar"}
+    style={shapeStyle("calendar", shown)}
+  >
+    <div class="frame" style={frameStyle("calendar", shown)}>
+      {@render outline("calendar")}
+      <div class="content calendar-row">
+        <svg class="calendar-glyph" viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="1.5" y="2.5" width="13" height="12" rx="2.5" />
+          <path d="M1.5 6.5h13M5 1v3M11 1v3" />
+        </svg>
+        <div class="calendar-copy" role="status">
+          {#key $reminder.seq}
+            <p class="calendar-text" in:fade={{ duration: 200 }} out:fade={{ duration: 120 }}>
+              <span class="calendar-title">{$reminder.title}</span>
+              <span class="calendar-when">{relativeLabel($reminder.minutesUntil)}</span>
+            </p>
+          {/key}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
     class="shape alert"
     class:on={$islandState === "alert"}
     style="{shapeStyle('alert', shown)}; --c: {alertColors.from}; --c2: {alertColors.to}"
@@ -560,6 +589,8 @@
             >
               {#if id === "timer"}
                 <TimerPage />
+              {:else if id === "calendar"}
+                <CalendarPage />
               {:else if id === "media"}
                 {#if $mediaState.active}
                   <div class="now">
@@ -584,6 +615,8 @@
                 {:else}
                   <p class="empty">Nothing playing</p>
                 {/if}
+              {:else if id === "stats"}
+                <StatsPage />
               {:else}
                 <ControlsPage />
               {/if}
@@ -1098,6 +1131,65 @@
   }
 
   .battery-level {
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* The calendar reminder pill. A calendar glyph in the calendar accent, then the event's title and
+     the time left, centred as one group, so the group's centre is the pill's centre. The title
+     shortens with an ellipsis. The pill takes no clicks, as the notification pill does. */
+  .shape.calendar.on {
+    pointer-events: none;
+  }
+
+  .calendar-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .calendar-glyph {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: #ff6a3d;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .calendar-copy {
+    display: grid;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .calendar-text {
+    grid-area: 1 / 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+  }
+
+  .calendar-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .calendar-when {
+    flex: none;
     font-weight: 400;
     font-variant-numeric: tabular-nums;
     color: rgba(255, 255, 255, 0.6);

@@ -1865,6 +1865,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "time",
  "ureq",
  "windows",
  "windows-core",

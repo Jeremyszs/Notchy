@@ -26,6 +26,7 @@ fn main() {
         .manage::<SharedIsland>(Arc::new(Mutex::new(IslandStateMachine::default())))
         .manage(modules::audio::AudioController::default())
         .manage(Arc::new(TimerHandle::default()))
+        .manage(modules::calendar::PendingAdd::default())
         .setup(|app| {
             let path = config::file_in(&app.path().app_config_dir()?);
             let settings = config::load(&path);
@@ -55,6 +56,13 @@ fn main() {
             modules::controls::network::open_settings,
             modules::notifications::notifications_snapshot,
             modules::battery::battery_snapshot,
+            modules::calendar::calendar_list,
+            modules::calendar::calendar_upcoming,
+            modules::calendar::calendar_between,
+            modules::calendar::calendar_upsert,
+            modules::calendar::calendar_delete,
+            modules::calendar::settings_open_calendar,
+            modules::calendar::calendar_take_add_date,
             modules::timer::timer_snapshot,
             modules::timer::timer_select,
             modules::timer::timer_start,
@@ -64,6 +72,7 @@ fn main() {
             modules::timer::timer_add_ms,
             modules::timer::timer_lap,
             modules::timer::timer_dismiss,
+            modules::stats::stats_set_active,
             config::config_get,
             config::config_set,
         ])

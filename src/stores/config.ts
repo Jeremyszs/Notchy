@@ -19,6 +19,20 @@ export interface Config {
   longBreakMinutes: number;
   notifications: NotificationSettings;
   battery: BatterySettings;
+  stats: StatsSettings;
+  calendar: CalendarSettings;
+}
+
+// Mirrors Stats in config.rs.
+export interface StatsSettings {
+  enabled: boolean;
+}
+
+// Mirrors Calendar in config.rs. The events themselves are not here: they live in events.json.
+export interface CalendarSettings {
+  enabled: boolean;
+  leadMinutes: number;
+  allDayHour: number;
 }
 
 // Mirrors Battery in config.rs.
@@ -37,7 +51,7 @@ export interface NotificationSettings {
 
 // The backend defaults. The notch uses them until the first answer arrives.
 export const DEFAULT_CONFIG: Config = {
-  pages: ["media", "controls", "timer"],
+  pages: ["media", "controls", "timer", "stats", "calendar"],
   controls: [
     "volume",
     "brightness",
@@ -60,6 +74,8 @@ export const DEFAULT_CONFIG: Config = {
   longBreakMinutes: 15,
   notifications: { enabled: true, deniedApps: [] },
   battery: { enabled: true, chargeAlerts: true, lowBatteryAlerts: true },
+  stats: { enabled: true },
+  calendar: { enabled: true, leadMinutes: 10, allDayHour: 9 },
 };
 
 const store = writable<Config>(DEFAULT_CONFIG);

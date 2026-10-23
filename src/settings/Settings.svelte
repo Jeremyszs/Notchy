@@ -10,7 +10,9 @@
   import { notificationsStatus } from "../stores/notifications";
   import { batteryStatus } from "../stores/battery";
   import { statusCopy } from "../lib/battery";
+  import { hourLabel, LEAD_OPTIONS, leadLabel } from "../lib/calendar";
   import { moveRow, ordered, type Row } from "./rows";
+  import CalendarMonth from "./CalendarMonth.svelte";
   import ReorderList from "./ReorderList.svelte";
   import Switch from "./Switch.svelte";
 
@@ -47,6 +49,11 @@
   let batteryOn = DEFAULT_CONFIG.battery.enabled;
   let batteryCharge = DEFAULT_CONFIG.battery.chargeAlerts;
   let batteryLow = DEFAULT_CONFIG.battery.lowBatteryAlerts;
+  let statsOn = DEFAULT_CONFIG.stats.enabled;
+  let calendarOn = DEFAULT_CONFIG.calendar.enabled;
+  let calendarLead = DEFAULT_CONFIG.calendar.leadMinutes;
+  let calendarHour = DEFAULT_CONFIG.calendar.allDayHour;
+  const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
   let confirmingReset = false;
   let status = "";
   let version = "";
@@ -57,7 +64,7 @@
   $: info = new Map(controls.map((control) => [control.id, control]));
   // Rows as the switches see them: a switch that cannot turn on stays off, and a control
   // this machine cannot run shows why.
-  $: pageView = pageLimits(pageRows);
+  $: pageView = pageLimits(pageRows, statsOn);
   $: controlView = controlLimits(controlRows, info);
 
   function buildRows(known: string[], shown: string[], label: (id: string) => string): Row[] {
@@ -69,10 +76,18 @@
     }));
   }
 
-  // At least one page stays on.
-  function pageLimits(rows: Row[]): Row[] {
+  // At least one page stays on. The Stats page also needs its own switch on, so its row says so.
+  function pageLimits(rows: Row[], stats: boolean): Row[] {
     const onCount = rows.filter((row) => row.on).length;
-    return rows.map((row) => ({ ...row, enabled: !row.on || onCount > 1 }));
+    return rows.map((row) => {
+      const off = row.id === "stats" && !stats;
+      return {
+        ...row,
+        enabled: !row.on || onCount > 1,
+        dim: off,
+        note: off ? "Off in Stats below" : undefined,
+      };
+    });
   }
 
   // Tiles are capped. Sliders are not. Unsupported controls cannot be switched on.
@@ -132,6 +147,8 @@
       longBreakMinutes,
       notifications: { enabled: notifyOn, deniedApps },
       battery: { enabled: batteryOn, chargeAlerts: batteryCharge, lowBatteryAlerts: batteryLow },
+      stats: { enabled: statsOn },
+      calendar: { enabled: calendarOn, leadMinutes: calendarLead, allDayHour: calendarHour },
     };
   }
 
@@ -212,6 +229,10 @@
     batteryOn = settings.battery.enabled;
     batteryCharge = settings.battery.chargeAlerts;
     batteryLow = settings.battery.lowBatteryAlerts;
+    statsOn = settings.stats.enabled;
+    calendarOn = settings.calendar.enabled;
+    calendarLead = settings.calendar.leadMinutes;
+    calendarHour = settings.calendar.allDayHour;
   }
 
   function resetDefaults(): void {
@@ -457,6 +478,77 @@
         </li>
       </ul>
       <p class="note" role="status">{statusCopy($batteryStatus)}</p>
+    </section>
+
+    <section aria-labelledby="stats-title">
+      <h2 id="stats-title">Stats</h2>
+      <ul class="group">
+        <li class="row">
+          <span class="text"><span class="label">Show system stats</span></span>
+          <Switch
+            checked={statsOn}
+            label="Show system stats"
+            onchange={(on) => {
+              statsOn = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+      </ul>
+      <p class="note">The CPU, memory, network and disk are read only while the Stats page is open.</p>
+    </section>
+
+    <section aria-labelledby="calendar-title">
+      <h2 id="calendar-title">Calendar</h2>
+      <ul class="group">
+        <li class="row">
+          <span class="text"><span class="label">Reminders for events</span></span>
+          <Switch
+            checked={calendarOn}
+            label="Reminders for events"
+            onchange={(on) => {
+              calendarOn = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">Remind before an event</span></span>
+          <select
+            class="choice"
+            aria-label="Remind before an event"
+            disabled={!calendarOn}
+            value={String(calendarLead)}
+            onchange={(event) => {
+              calendarLead = Number(event.currentTarget.value);
+              scheduleSave();
+            }}
+          >
+            {#each LEAD_OPTIONS as lead (lead)}
+              <option value={String(lead)}>{leadLabel(lead)}</option>
+            {/each}
+          </select>
+        </li>
+        <li class="row">
+          <span class="text"><span class="label">All-day events remind at</span></span>
+          <select
+            class="choice"
+            aria-label="All-day events remind at this hour"
+            disabled={!calendarOn}
+            value={String(calendarHour)}
+            onchange={(event) => {
+              calendarHour = Number(event.currentTarget.value);
+              scheduleSave();
+            }}
+          >
+            {#each HOURS as hour (hour)}
+              <option value={String(hour)}>{hourLabel(hour)}</option>
+            {/each}
+          </select>
+        </li>
+      </ul>
+      <p class="note">Events are kept on this PC. Notchy never sends them anywhere.</p>
+      <CalendarMonth />
     </section>
 
     <section aria-labelledby="timer-title">
@@ -718,6 +810,24 @@
     gap: 6px;
     font-size: 15px;
     color: rgba(255, 255, 255, 0.55);
+  }
+
+  .choice {
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    color-scheme: dark;
+  }
+
+  .choice:disabled {
+    opacity: 0.4;
   }
 
   .minutes-field input {

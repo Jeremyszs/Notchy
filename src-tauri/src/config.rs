@@ -19,6 +19,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::w;
 
+use crate::modules::calendar;
 use crate::modules::controls::{self, Kind};
 use crate::modules::lyrics;
 use crate::modules::notifications;
@@ -26,7 +27,7 @@ use crate::modules::notifications;
 const FILE_NAME: &str = "config.json";
 const UPDATE_EVENT: &str = "config://update";
 /// Page ids the notch knows how to show, in their default order.
-pub const PAGES: [&str; 3] = ["media", "controls", "timer"];
+pub const PAGES: [&str; 5] = ["media", "controls", "timer", "stats", "calendar"];
 /// Pomodoro lengths in whole minutes: the bounds the settings and the file are held to.
 pub const FOCUS_MINUTES: (u32, u32, u32) = (25, 1, 120);
 pub const SHORT_BREAK_MINUTES: (u32, u32, u32) = (5, 1, 60);
@@ -84,6 +85,69 @@ pub struct Config {
     pub notifications: Notifications,
     /// Charger and battery-level pills in the island.
     pub battery: Battery,
+    /// The system stats page.
+    pub stats: Stats,
+    /// Calendar reminders and the Calendar page.
+    pub calendar: Calendar,
+}
+
+/// The stats page's settings. Mirrors `stats` in src/stores/config.ts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Stats {
+    /// Show the Stats page and sample the system while it is on screen. Off, the page is hidden and
+    /// nothing is read.
+    pub enabled: bool,
+}
+
+impl Default for Stats {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+
+/// The calendar's reminder settings. Mirrors `calendar` in src/stores/config.ts. The events
+/// themselves are in `events.json`, not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Calendar {
+    /// Reminders for the calendar's events, and the Calendar page. On by default.
+    pub enabled: bool,
+    /// Minutes before an event to remind at. One of LEAD_CHOICES.
+    pub lead_minutes: u32,
+    /// The hour, 0 to 23, an all-day event is announced at on its day.
+    pub all_day_hour: u8,
+}
+
+/// The lead times the Settings window offers, in minutes.
+pub const LEAD_CHOICES: [u32; 5] = [5, 10, 15, 30, 60];
+const DEFAULT_LEAD_MINUTES: u32 = 10;
+const DEFAULT_ALL_DAY_HOUR: u8 = 9;
+
+impl Default for Calendar {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            lead_minutes: DEFAULT_LEAD_MINUTES,
+            all_day_hour: DEFAULT_ALL_DAY_HOUR,
+        }
+    }
+}
+
+impl Calendar {
+    /// A lead time outside LEAD_CHOICES falls back to the default, and an hour past 23 is held to 23.
+    fn sanitize(self) -> Self {
+        Self {
+            lead_minutes: if LEAD_CHOICES.contains(&self.lead_minutes) {
+                self.lead_minutes
+            } else {
+                DEFAULT_LEAD_MINUTES
+            },
+            all_day_hour: self.all_day_hour.min(23),
+            ..self
+        }
+    }
 }
 
 /// The battery feature's settings. Mirrors `battery` in src/stores/config.ts.
@@ -161,6 +225,8 @@ impl Default for Config {
             long_break_minutes: LONG_BREAK_MINUTES.0,
             notifications: Notifications::default(),
             battery: Battery::default(),
+            stats: Stats::default(),
+            calendar: Calendar::default(),
         }
     }
 }
@@ -204,6 +270,7 @@ impl Config {
             short_break_minutes: clamp_minutes(SHORT_BREAK_MINUTES, self.short_break_minutes),
             long_break_minutes: clamp_minutes(LONG_BREAK_MINUTES, self.long_break_minutes),
             notifications: self.notifications.sanitize(),
+            calendar: self.calendar.sanitize(),
             ..self
         }
     }
@@ -254,6 +321,19 @@ pub fn notifications_enabled(app: &AppHandle) -> bool {
 pub fn battery(app: &AppHandle) -> Battery {
     app.try_state::<SharedConfig>()
         .map(|config| lock(&config).battery)
+        .unwrap_or_default()
+}
+
+/// Whether the stats page is on. Defaults to on when no config is managed yet.
+pub fn stats_enabled(app: &AppHandle) -> bool {
+    app.try_state::<SharedConfig>()
+        .is_none_or(|config| lock(&config).stats.enabled)
+}
+
+/// The calendar reminder settings. The defaults when no config is managed yet.
+pub fn calendar(app: &AppHandle) -> Calendar {
+    app.try_state::<SharedConfig>()
+        .map(|config| lock(&config).calendar)
         .unwrap_or_default()
 }
 
@@ -431,6 +511,9 @@ pub async fn config_set(app: AppHandle, config: Config) -> Result<Config, String
     if previous.notifications != next.notifications {
         notifications::reapply(&app);
     }
+    if previous.calendar != next.calendar {
+        calendar::reapply(&app);
+    }
     let _ = app.emit(UPDATE_EVENT, &next);
     autostart.map(|()| next)
 }
@@ -471,7 +554,10 @@ mod tests {
             pages: ids(&["bogus"]),
             ..Config::default()
         };
-        assert_eq!(none_known.sanitize().pages, ids(&["media", "controls", "timer"]));
+        assert_eq!(
+            none_known.sanitize().pages,
+            ids(&["media", "controls", "timer", "stats", "calendar"])
+        );
 
         let one = Config {
             pages: ids(&["media"]),
@@ -538,7 +624,11 @@ mod tests {
         let json = serde_json::to_string(&Config::default()).unwrap();
         assert!(json.contains("\"confirmLock\":true"));
         assert!(json.contains("\"launchAtLogin\":false"));
-        assert!(json.contains("\"pages\":[\"media\",\"controls\",\"timer\"]"));
+        assert!(json.contains("\"pages\":[\"media\",\"controls\",\"timer\",\"stats\",\"calendar\"]"));
+        assert!(json.contains("\"stats\":{\"enabled\":true}"));
+        assert!(
+            json.contains("\"calendar\":{\"enabled\":true,\"leadMinutes\":10,\"allDayHour\":9}")
+        );
         assert!(json.contains("\"font\":\"inter\""));
         assert!(json.contains("\"hud\":true"));
         assert!(json.contains("\"timerSound\":true"));
@@ -569,6 +659,20 @@ mod tests {
                 low_battery_alerts: false,
             }
         );
+    }
+
+    /// Files written before the stats page existed have no such key. The stats setting is on, but
+    /// the page is not in their page list, so it stays off until the user turns it on in Settings.
+    #[test]
+    fn file_without_stats_settings_keeps_the_page_off_and_the_setting_on() {
+        let old: Config =
+            serde_json::from_str(r#"{"pages": ["media", "controls", "timer"]}"#).unwrap();
+        let old = old.sanitize();
+        assert_eq!(old.pages, ids(&["media", "controls", "timer"]));
+        assert_eq!(old.stats, Stats { enabled: true });
+
+        let off: Config = serde_json::from_str(r#"{"stats": {"enabled": false}}"#).unwrap();
+        assert!(!off.sanitize().stats.enabled);
     }
 
     /// Files written before notifications existed have no such key. They get it on, with nothing
@@ -819,8 +923,65 @@ mod tests {
         )
         .unwrap();
         let config = load(&path);
-        assert_eq!(config.pages, ids(&["media", "controls", "timer"]));
+        assert_eq!(
+            config.pages,
+            ids(&["media", "controls", "timer", "stats", "calendar"])
+        );
         assert_eq!(config.controls, ids(&["wifi"]));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Files written before calendar existed have no such key. They get reminders on, at the
+    /// defaults, and the rest of their settings are kept.
+    #[test]
+    fn file_without_calendar_settings_gets_the_defaults() {
+        let config: Config = serde_json::from_str(r#"{"pages": ["media", "timer"]}"#).unwrap();
+        let config = config.sanitize();
+        assert_eq!(config.calendar, Calendar::default());
+        assert_eq!(config.pages, ids(&["media", "timer"]));
+
+        let partial: Config = serde_json::from_str(r#"{"calendar": {"leadMinutes": 30}}"#).unwrap();
+        assert_eq!(
+            partial.sanitize().calendar,
+            Calendar {
+                enabled: true,
+                lead_minutes: 30,
+                all_day_hour: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn calendar_lead_times_outside_the_choices_fall_back_to_ten_minutes() {
+        for lead in LEAD_CHOICES {
+            let config = Config {
+                calendar: Calendar {
+                    lead_minutes: lead,
+                    ..Calendar::default()
+                },
+                ..Config::default()
+            };
+            assert_eq!(config.sanitize().calendar.lead_minutes, lead);
+        }
+        let odd = Config {
+            calendar: Calendar {
+                lead_minutes: 7,
+                ..Calendar::default()
+            },
+            ..Config::default()
+        };
+        assert_eq!(odd.sanitize().calendar.lead_minutes, 10);
+    }
+
+    #[test]
+    fn calendar_all_day_hour_is_held_to_a_clock_hour() {
+        let late = Config {
+            calendar: Calendar {
+                all_day_hour: 40,
+                ..Calendar::default()
+            },
+            ..Config::default()
+        };
+        assert_eq!(late.sanitize().calendar.all_day_hour, 23);
     }
 }

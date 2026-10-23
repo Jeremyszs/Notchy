@@ -12,6 +12,7 @@ export type IslandState =
   | "hud"
   | "notification"
   | "battery"
+  | "calendar"
   | "alert"
   | "hidden";
 

@@ -7,12 +7,14 @@
 
 pub mod audio;
 pub mod battery;
+pub mod calendar;
 pub mod context;
 pub mod controls;
 pub mod hud;
 pub mod lyrics;
 pub mod media;
 pub mod notifications;
+pub mod stats;
 pub mod timer;
 
 use tauri::{AppHandle, Manager};
@@ -37,14 +39,16 @@ pub fn start_all(app: &AppHandle) {
         app: app.clone(),
         island: app.state::<SharedIsland>().inner().clone(),
     };
-    let modules: [&dyn Module; 7] = [
+    let modules: [&dyn Module; 9] = [
         &media::MediaModule,
         &lyrics::LyricsModule,
         &context::ContextModule,
         &hud::HudModule,
         &battery::BatteryModule,
         &notifications::NotificationsModule,
+        &calendar::CalendarModule,
         &timer::TimerModule,
+        &stats::StatsModule,
     ];
     for module in modules {
         if cfg!(debug_assertions) {
