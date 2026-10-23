@@ -620,6 +620,28 @@ fn update<T>(app: &AppHandle, change: impl FnOnce(&mut Engine, Instant) -> T) ->
     (result, snapshot)
 }
 
+fn toggle_decision(snapshot: &Snapshot) -> Option<Status> {
+    match snapshot.status {
+        Status::Running => Some(Status::Paused),
+        Status::Paused => Some(Status::Running),
+        Status::Idle | Status::Done => None,
+    }
+}
+
+pub(crate) fn toggle(app: &AppHandle) {
+    update(app, |engine, now| {
+        match toggle_decision(&engine.snapshot(now, 0)) {
+            Some(Status::Paused) => {
+                engine.pause(now);
+            }
+            Some(Status::Running) => {
+                engine.resume(now);
+            }
+            _ => {}
+        }
+    });
+}
+
 #[tauri::command]
 pub fn timer_snapshot(app: AppHandle) -> Snapshot {
     update(&app, |_, _| ()).1
@@ -702,6 +724,26 @@ mod tests {
         let mut engine = Engine::default();
         engine.select(Mode::Stopwatch, None).unwrap();
         engine
+    }
+
+    #[test]
+    fn toggle_decision_only_pauses_or_resumes_a_live_clock() {
+        let clock = Clock::new();
+        let mut engine = timer(1);
+        assert_eq!(toggle_decision(&engine.snapshot(clock.at(0), 0)), None);
+        engine.start(clock.at(0));
+        assert_eq!(
+            toggle_decision(&engine.snapshot(clock.at(1), 0)),
+            Some(Status::Paused)
+        );
+        engine.pause(clock.at(1));
+        assert_eq!(
+            toggle_decision(&engine.snapshot(clock.at(2), 0)),
+            Some(Status::Running)
+        );
+        engine.resume(clock.at(2));
+        engine.tick(clock.at(60_001));
+        assert_eq!(toggle_decision(&engine.snapshot(clock.at(60_001), 0)), None);
     }
 
     #[test]

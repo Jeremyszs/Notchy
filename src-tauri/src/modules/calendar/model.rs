@@ -137,11 +137,17 @@ pub struct EventInput {
     pub start: String,
     pub all_day: bool,
     pub recurrence: Recurrence,
+    #[serde(default)]
+    pub duration_minutes: Option<u32>,
+    #[serde(default)]
+    pub remind_before_minutes: Option<Vec<u32>>,
 }
 
 /// The checked fields of an input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checked {
+    pub duration_minutes: Option<u32>,
+    pub remind_before_minutes: Option<Vec<u32>>,
     pub title: String,
     pub notes: String,
     pub start: LocalDateTime,
@@ -171,7 +177,31 @@ pub fn check(input: &EventInput) -> Result<Checked, String> {
     } else {
         start
     };
+    let (duration_minutes, remind_before_minutes) = if input.all_day {
+        (None, None)
+    } else {
+        if input
+            .duration_minutes
+            .is_some_and(|minutes| !(1..=1440).contains(&minutes))
+        {
+            return Err("Length must be between 1 and 1440 minutes.".to_string());
+        }
+        let mut reminders = input.remind_before_minutes.clone();
+        if let Some(leads) = &mut reminders {
+            if leads.len() > 5 {
+                return Err("Pick at most five reminder times.".to_string());
+            }
+            if leads.iter().any(|minutes| !(1..=10080).contains(minutes)) {
+                return Err("Reminder times must be between 1 and 10080 minutes.".to_string());
+            }
+            leads.sort_unstable();
+            leads.dedup();
+        }
+        (input.duration_minutes, reminders)
+    };
     Ok(Checked {
+        duration_minutes,
+        remind_before_minutes,
         title: title.to_string(),
         notes: input.notes.clone(),
         start,
@@ -557,6 +587,8 @@ mod tests {
     #[test]
     fn check_trims_the_title_and_refuses_an_empty_one() {
         let input = EventInput {
+            duration_minutes: None,
+            remind_before_minutes: None,
             id: None,
             title: "   ".into(),
             notes: String::new(),
@@ -576,6 +608,8 @@ mod tests {
     #[test]
     fn check_refuses_a_bad_start_and_long_text() {
         let base = EventInput {
+            duration_minutes: None,
+            remind_before_minutes: None,
             id: None,
             title: "Lunch".into(),
             notes: String::new(),
@@ -603,6 +637,8 @@ mod tests {
     #[test]
     fn an_all_day_start_is_pinned_to_midnight() {
         let input = EventInput {
+            duration_minutes: None,
+            remind_before_minutes: None,
             id: None,
             title: "Holiday".into(),
             notes: String::new(),
@@ -611,6 +647,44 @@ mod tests {
             recurrence: Recurrence::None,
         };
         assert_eq!(check(&input).unwrap().start.0, datetime!(2026-10-23 00:00));
+    }
+
+    #[test]
+    fn optional_length_and_leads_are_checked_and_normalized() {
+        let mut input: EventInput = serde_json::from_str(
+            r#"{
+            "title":"Lunch","notes":"","start":"2026-10-23T10:00",
+            "allDay":false,"recurrence":"none"
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(check(&input).unwrap().duration_minutes, None);
+        assert_eq!(check(&input).unwrap().remind_before_minutes, None);
+        for duration in [1, 1440] {
+            input.duration_minutes = Some(duration);
+            assert_eq!(check(&input).unwrap().duration_minutes, Some(duration));
+        }
+        for duration in [0, 1441, u32::MAX] {
+            input.duration_minutes = Some(duration);
+            assert!(check(&input).is_err());
+        }
+        input.duration_minutes = None;
+        input.remind_before_minutes = Some(vec![10080, 1, 10, 1]);
+        assert_eq!(
+            check(&input).unwrap().remind_before_minutes,
+            Some(vec![1, 10, 10080])
+        );
+        input.remind_before_minutes = Some(vec![]);
+        assert_eq!(check(&input).unwrap().remind_before_minutes, Some(vec![]));
+        for leads in [vec![0], vec![10081], vec![1, 2, 3, 4, 5, 6]] {
+            input.remind_before_minutes = Some(leads);
+            assert!(check(&input).is_err());
+        }
+        input.all_day = true;
+        input.duration_minutes = Some(0);
+        let checked = check(&input).unwrap();
+        assert_eq!(checked.duration_minutes, None);
+        assert_eq!(checked.remind_before_minutes, None);
     }
 
     #[test]

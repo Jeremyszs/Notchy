@@ -2,7 +2,9 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getVersion } from "@tauri-apps/api/app";
-  import { DEFAULT_CONFIG, type Config } from "../stores/config";
+  import { DEFAULT_CONFIG, type Config, type HotkeySettings } from "../stores/config";
+  import { hotkeysStatus } from "../stores/hotkeys";
+  import { bindingError, cleanAccelerator, HOTKEY_ACTIONS, type HotkeyAction } from "../lib/hotkeys";
   import { PAGE_LABELS, type Page } from "../stores/pages";
   import type { ControlInfo } from "../stores/controls";
   import { FONT_OPTIONS, fontStack, type FontId } from "../lib/font";
@@ -53,6 +55,7 @@
   let calendarOn = DEFAULT_CONFIG.calendar.enabled;
   let calendarLead = DEFAULT_CONFIG.calendar.leadMinutes;
   let calendarHour = DEFAULT_CONFIG.calendar.allDayHour;
+  let hotkeys: HotkeySettings = { ...DEFAULT_CONFIG.hotkeys };
   const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
   let confirmingReset = false;
   let status = "";
@@ -149,7 +152,14 @@
       battery: { enabled: batteryOn, chargeAlerts: batteryCharge, lowBatteryAlerts: batteryLow },
       stats: { enabled: statsOn },
       calendar: { enabled: calendarOn, leadMinutes: calendarLead, allDayHour: calendarHour },
+      hotkeys,
     };
+  }
+
+  // A shortcut is saved tidied, so "ctrl + t" is kept as "ctrl+t". An empty one leaves its action unbound.
+  function setHotkey(action: HotkeyAction, typed: string): void {
+    hotkeys = { ...hotkeys, [action]: cleanAccelerator(typed) };
+    scheduleSave();
   }
 
   // Turning an app on or off changes only the denied list. The save is the same as any other change.
@@ -233,6 +243,7 @@
     calendarOn = settings.calendar.enabled;
     calendarLead = settings.calendar.leadMinutes;
     calendarHour = settings.calendar.allDayHour;
+    hotkeys = { ...settings.hotkeys };
   }
 
   function resetDefaults(): void {
@@ -625,6 +636,53 @@
       </ul>
     </section>
 
+    <section aria-labelledby="hotkeys-title">
+      <h2 id="hotkeys-title">Hotkeys</h2>
+      <ul class="group">
+        <li class="row">
+          <span class="text"><span class="label">Global hotkeys</span></span>
+          <Switch
+            checked={hotkeys.enabled}
+            label="Global hotkeys"
+            onchange={(on) => {
+              hotkeys = { ...hotkeys, enabled: on };
+              scheduleSave();
+            }}
+          />
+        </li>
+        {#each HOTKEY_ACTIONS as action (action.id)}
+          {@const error = hotkeys.enabled ? bindingError($hotkeysStatus, action.id) : null}
+          <li class="row hotkey-row">
+            <span class="text">
+              <span class="label">{action.label}</span>
+              {#if error}
+                <span class="hotkey-error" role="status">{error}</span>
+              {/if}
+            </span>
+            <input
+              class="accelerator"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="Not set"
+              aria-label="{action.label} shortcut"
+              disabled={!hotkeys.enabled}
+              value={hotkeys[action.id]}
+              onchange={(event) => {
+                setHotkey(action.id, event.currentTarget.value);
+                event.currentTarget.value = hotkeys[action.id];
+              }}
+            />
+          </li>
+        {/each}
+      </ul>
+      <p class="note">
+        Use a key combination such as Ctrl+Alt+Space. Clear a box to turn that shortcut off. Shortcuts
+        work in every app, so they are off until you turn them on, and a key another app already uses
+        cannot be taken.
+      </p>
+    </section>
+
     <div class="reset">
       {#if confirmingReset}
         <p>Reset every setting to its default?</p>
@@ -828,6 +886,49 @@
 
   .choice:disabled {
     opacity: 0.4;
+  }
+
+  /* A row that holds a status line grows to fit it, but keeps the 56 px minimum of the other rows. */
+  .hotkey-row {
+    height: auto;
+    min-height: 56px;
+    padding: 10px 16px;
+  }
+
+  .hotkey-error {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 18px;
+    color: #ff453a;
+  }
+
+  .accelerator {
+    flex: none;
+    width: 168px;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    color-scheme: dark;
+  }
+
+  .accelerator::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .accelerator:disabled {
+    opacity: 0.4;
+  }
+
+  .accelerator:focus-visible {
+    outline: 2px solid #0a84ff;
+    outline-offset: 2px;
   }
 
   .minutes-field input {

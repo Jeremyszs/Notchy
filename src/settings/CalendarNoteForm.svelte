@@ -5,14 +5,24 @@
   // calendar://update, so the grid refreshes itself.
   import { invoke } from "@tauri-apps/api/core";
   import {
-    formStart,
+    durationFrom,
+    eventInput,
     hasErrors,
+    leadLabel,
+    LENGTH_OPTIONS,
+    lengthChoiceOf,
+    MAX_DURATION_MINUTES,
+    REMIND_MAX,
+    REMIND_OPTIONS,
     REPEAT_OPTIONS,
+    reminderChipLabel,
+    toggleReminder,
     validateForm,
     type EventForm,
     type FormErrors,
   } from "../lib/calendar.ts";
   import { longDate } from "../lib/month.ts";
+  import { config } from "../stores/config";
   import Switch from "./Switch.svelte";
 
   /** The form to start from. It is copied, so the parent keeps its own value. */
@@ -28,6 +38,21 @@
   let errors: FormErrors = {};
   let formError = "";
   let busy = false;
+  // The length field's choice ("none", the minutes, or "custom") and the typed minutes for "custom".
+  let lengthChoice = lengthChoiceOf(form.durationMinutes);
+  let customLength = form.durationMinutes === null ? "" : String(form.durationMinutes);
+  $: form.durationMinutes = durationFrom(lengthChoice, customLength);
+  // "Default" is the Settings lead time, which is what a null list means.
+  $: defaultOn = form.remindBeforeMinutes === null;
+
+  // Turns the Settings default on, or off to an empty list (the start only) when it is on.
+  function toggleDefault(): void {
+    form.remindBeforeMinutes = defaultOn ? [] : null;
+  }
+
+  function pickRemind(minutes: number): void {
+    form.remindBeforeMinutes = toggleReminder(form.remindBeforeMinutes, minutes);
+  }
 
   async function save(): Promise<void> {
     if (busy) return;
@@ -36,16 +61,7 @@
     busy = true;
     formError = "";
     try {
-      await invoke("calendar_upsert", {
-        input: {
-          id: editingId,
-          title: form.title.trim(),
-          notes: form.notes,
-          start: formStart(form),
-          allDay: form.allDay,
-          recurrence: form.recurrence,
-        },
-      });
+      await invoke("calendar_upsert", { input: eventInput(form, editingId) });
       ondone();
     } catch (error) {
       formError = String(error);
@@ -132,6 +148,77 @@
     </div>
   </div>
 
+  {#if !form.allDay}
+    <div class="field-row">
+      <div class="field">
+        <label for="note-length">Length</label>
+        <select
+          id="note-length"
+          aria-invalid={errors.duration ? "true" : undefined}
+          bind:value={lengthChoice}
+        >
+          <option value="none">No length</option>
+          {#each LENGTH_OPTIONS as minutes (minutes)}
+            <option value={String(minutes)}>{leadLabel(minutes)}</option>
+          {/each}
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      {#if lengthChoice === "custom"}
+        <div class="field">
+          <label for="note-length-custom">Minutes</label>
+          <input
+            id="note-length-custom"
+            type="number"
+            inputmode="numeric"
+            min="1"
+            max={MAX_DURATION_MINUTES}
+            step="1"
+            aria-invalid={errors.duration ? "true" : undefined}
+            value={customLength}
+            oninput={(event) => (customLength = event.currentTarget.value)}
+          />
+        </div>
+      {/if}
+    </div>
+    {#if errors.duration}
+      <p class="field-error" role="alert">{errors.duration}</p>
+    {/if}
+
+    <div class="field">
+      <span class="field-label" id="note-remind-label">Remind me</span>
+      <div class="chips" role="group" aria-labelledby="note-remind-label">
+        <button
+          type="button"
+          class="chip"
+          aria-pressed={defaultOn}
+          onclick={toggleDefault}
+        >
+          Default
+        </button>
+        {#each REMIND_OPTIONS as minutes (minutes)}
+          {@const picked = form.remindBeforeMinutes?.includes(minutes) ?? false}
+          <button
+            type="button"
+            class="chip"
+            aria-pressed={picked}
+            disabled={!picked && (form.remindBeforeMinutes?.length ?? 0) >= REMIND_MAX}
+            onclick={() => pickRemind(minutes)}
+          >
+            {reminderChipLabel(minutes)}
+          </button>
+        {/each}
+      </div>
+      {#if defaultOn}
+        <p class="hint">{leadLabel($config.calendar.leadMinutes)} before, as set in Settings.</p>
+      {:else if form.remindBeforeMinutes?.length === 0}
+        <p class="hint">Only when it starts.</p>
+      {:else}
+        <p class="hint">Up to {REMIND_MAX} reminders.</p>
+      {/if}
+    </div>
+  {/if}
+
   <div class="inline">
     <span class="inline-label">All day</span>
     <Switch
@@ -169,9 +256,41 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
-  .field label {
+  .field label,
+  .field-label {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.55);
+  }
+
+  /* The reminder choices are toggles: off is 10% white, on is white with a black label. */
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    height: 28px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.85);
+    font: inherit;
+    font-size: 13px;
+    line-height: 16px;
+    cursor: pointer;
+  }
+
+  .chip[aria-pressed="true"] {
+    background: #fff;
+    color: #000;
+    font-weight: 600;
+  }
+
+  .chip:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   /* Two columns that can shrink below their inputs' native width, so the pair stays in the group. */

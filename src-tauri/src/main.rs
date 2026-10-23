@@ -23,6 +23,7 @@ fn main() {
     // Before Tauri or any module touches COM. See `init_process_security`.
     modules::controls::init_process_security();
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage::<SharedIsland>(Arc::new(Mutex::new(IslandStateMachine::default())))
         .manage(modules::audio::AudioController::default())
         .manage(Arc::new(TimerHandle::default()))
@@ -44,6 +45,8 @@ fn main() {
             modules::media::media_next,
             modules::media::media_previous,
             modules::media::media_snapshot,
+            modules::media::media_seek,
+            modules::hotkeys::hotkeys_status,
             modules::lyrics::lyrics_snapshot,
             modules::audio::audio_set_active,
             state::island_set_wide,
@@ -57,6 +60,8 @@ fn main() {
             modules::notifications::notifications_snapshot,
             modules::battery::battery_snapshot,
             modules::calendar::calendar_list,
+            modules::calendar::calendar_recent_reminder,
+            modules::calendar::calendar_snooze,
             modules::calendar::calendar_upcoming,
             modules::calendar::calendar_between,
             modules::calendar::calendar_upsert,
@@ -76,6 +81,11 @@ fn main() {
             config::config_get,
             config::config_set,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Notchy");
+        .build(tauri::generate_context!())
+        .expect("error while running Notchy")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                modules::hotkeys::shutdown(app);
+            }
+        });
 }

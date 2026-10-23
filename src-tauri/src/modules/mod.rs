@@ -10,6 +10,7 @@ pub mod battery;
 pub mod calendar;
 pub mod context;
 pub mod controls;
+pub mod hotkeys;
 pub mod hud;
 pub mod lyrics;
 pub mod media;
@@ -39,7 +40,7 @@ pub fn start_all(app: &AppHandle) {
         app: app.clone(),
         island: app.state::<SharedIsland>().inner().clone(),
     };
-    let modules: [&dyn Module; 9] = [
+    let modules: [&dyn Module; 10] = [
         &media::MediaModule,
         &lyrics::LyricsModule,
         &context::ContextModule,
@@ -49,6 +50,7 @@ pub fn start_all(app: &AppHandle) {
         &calendar::CalendarModule,
         &timer::TimerModule,
         &stats::StatsModule,
+        &hotkeys::HotkeysModule,
     ];
     for module in modules {
         if cfg!(debug_assertions) {

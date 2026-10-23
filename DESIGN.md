@@ -213,6 +213,11 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | 13 / 16 | 600 | Settings month "Today" button |
 | 15 / 20 | 400 | Settings note title, and 600 for "Add note" and Save |
 | 13 / 18 | 400 | Settings note time and notes line (55% white); status line (red, #FF453A) |
+| 13 / 16 | 400, and 600 when on | Settings note form: length and reminder chips (on: white chip with a black label) |
+| 13 / 18 | 400 | Settings hotkey conflict line (red, #FF453A), under the action it belongs to |
+| 11 / 14 | 400 | Media progress times, elapsed and length (tabular, 60% white) |
+| 12 / 24 | 500 | Calendar page snooze title (90% white), one line with an ellipsis |
+| 11 / 20 | 600 | Calendar page snooze buttons, "5 min" and "10 min" (accent text) |
 
 - **Tabular numbers.** Every number that changes while shown uses `font-variant-numeric: tabular-nums`
   (digits, activity clock, HUD value, idle clock, stepper value). `RollingClock` lays each digit in a
@@ -258,6 +263,9 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Island calendar page, day with notes | `#FF6A3D` at 22% fill | | the day number in `#FF6A3D` (about 5.7:1 on that fill, computed) |
 | Island calendar page, selected day | `#FF6A3D` | | solid disc, black number (7.4:1) |
 | Island calendar page, "Add note" | `#FF6A3D` | | link text (7.4:1 on `#000`) |
+| Island calendar page, snooze buttons | `#FF6A3D` | | link text (7.4:1 on `#000`), with a 14% accent fill on hover |
+| Media progress bar | `#FFFFFF` | | the fill, on a track at 16% white. No accent: the artwork is the colour |
+| Settings form, chips on | `#FFFFFF` | | a toggle that is on: white with a black label, as the switches are |
 
 - **Accent use.** An accent fills a ring, a strong pill, a filled pomodoro session, or the glow. It is
   never used for body text. A filled session dot is the accent at 100%, an empty one is the accent at
@@ -301,6 +309,7 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Spinner and pulse | 800 ms linear; 1200 ms ease-in-out | | transform, opacity |
 | Settings month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform and opacity. Reduced motion: a 150 ms fade, no slide |
 | Island calendar month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | cubic-out (Svelte `fly`) | transform and opacity. Reduced motion: a 150 ms fade, no slide |
+| Media progress fill | 250 ms, linear, one step per tick (the clock ticks 4 times a second while it runs) | linear | transform scaleX. A drag has no transition, and reduced motion jumps |
 
 Rules:
 
@@ -417,8 +426,8 @@ on the right, in the 146 px page box. One CSS grid holds both columns, so they s
 | Day rows | six 17 px rows, 102 in all. Always six, so the page never changes height |
 | Arrow buttons | 24 x 18 each, so the title centres between them |
 | Day hit area | the whole 26 x 17 cell. The number is a 16 px disc inside it |
-| Notes body | 102 tall, the height of the six day rows, with the content centred in it |
-| Note row | 24 tall. Up to four rows: the notes, or three notes and a "+N more" row |
+| Notes body | 102 tall, the height of the six day rows, with the content centred in it. With the snooze strip: 72 tall, then a 6 px gap and the 24 px strip |
+| Note row | 24 tall. Up to four rows: the notes, or three notes and a "+N more" row. With the snooze strip, up to three rows |
 
 Text: the month title 13 / 18 600 (100% white). Weekday initials 11 / 12 600 at 55%. Day numbers 11 / 16
 500, tabular, at 90% (40% outside the month). The selected date 12 / 18 600 at 90%, and "Add note" 12 / 18
@@ -454,6 +463,14 @@ Behaviour:
 Clicks are hit-tested by the pill's size like the Controls tiles. The clicks were driven in the browser
 harness, not in the Tauri window (see section 13).
 
+**Snooze strip.** When a reminder can be snoozed (`recentReminder` in `stores/calendar.ts`, from
+`calendar://recent`), the bottom of the notes column holds a strip. The notes body gives up 30 px, which is a 6 px
+gap and a 24 px strip, so the body is 72 px tall and holds three note rows (`noteRows(count, 3)`). The strip
+has the reminder's title (12 / 24 500 at 90%, one line with an ellipsis) and two 20 px accent buttons, "5 min"
+and "10 min" (11 / 20 600 in `#FF6A3D`), with 4 px between them. The title takes what the buttons leave. A
+failed snooze puts its error text in the title until a new reminder arrives. With no snooze the body is the
+full 102 px again, so the grid and the page do not move when the strip appears. The strip has no motion.
+
 ### Calendar month (Settings)
 `CalendarMonth.svelte` is the Calendar section of Settings. A month grid sits in a card above a panel for the selected day. The card's side padding is the group padding (16 px), so the grid lines up with the rows of the groups above and below.
 
@@ -464,7 +481,7 @@ Measured in the browser harness at a 560 px window (the Settings minimum). The c
 - **Grid.** A 240 px frame, always six rows of 40 px, so the card is the same height in every month. Seven equal columns of `(card - 32) / 7`, which is 68.56 px at 512 px. A weekday's centre and the centre of the day under it agree within 0.01 px.
 - **Day.** A 36 px round button centred in its 40 px cell. Days outside the month are 40% white. A day with notes is the accent at 22% with accent text. The selected day is solid, with a black number at weight 600: black on `#FF6A3D` is 7.4:1, where white would be 2.85:1, below the 4.5:1 for small text. Today has a 1.5 px inset ring at 55% white, unless it is selected.
 - **Panel.** A 44 px heading with the full date. A note row is at least 56 px: the title (15 px), a time line with the repeat word (13 px, 55%), an optional notes line (13 px, 55%, one line), and Edit and Delete as 32 px buttons. Delete keeps its confirm step. An empty day shows "No notes" in a 56 px row, then the 44 px "Add note" row.
-- **Form.** The rows of the Settings groups: 12 px by 16 px fields, 8% white hairlines. Adding shows the selected date as a label. Editing shows a date input, and a repeating note says that every occurrence changes. The start time is the next full hour.
+- **Form.** The rows of the Settings groups: 12 px by 16 px fields, 8% white hairlines. A timed event shows Length (a select: no length, 15 minutes to 2 hours, or Custom, which shows a minutes field beside it, from 1 to 1440) and Remind me (chips: Default, which is the Settings lead time, or any of 5 min, 10 min, 15 min, 30 min, 1 hour and 1 day, up to five at once; none picked means only at the start). All-day events show neither, and save with no length and no reminders. Adding shows the selected date as a label. Editing shows a date input, and a repeating note says that every occurrence changes. The start time is the next full hour.
 - **Keyboard.** The grid has the grid role and a roving tab stop on the selected day. Arrow keys move the selection a day or a week, Home and End move to the ends of the week, and PageUp and PageDown move a month and keep the day (clamped to the month's length). Focus follows the selection. Each day's label is the full date and its count, such as "Friday 23 October, 2 notes".
 - **Data.** The grid asks `calendar_between` for its six weeks. It asks again when the event list changes (`calendar://update`), and an answer that arrives late is dropped.
 
@@ -473,6 +490,15 @@ Measured in the harness: 0 notes (2 October), 1 note (6 October), 4 notes (23 Oc
 ### Pager
 Row 16 px tall, 4 px gaps. Each dot is a 16 px hit area with a 5 px white dot at 35% opacity (100%
 when current). The row is centred, with 8 px under it.
+
+### Media progress line
+`MediaProgress.svelte` is one 14 px row under the artist, in the media text column of both the panel and the lyrics layout. The text column is centred beside the cover art, so the art still sets the row height and the page keeps the heights in section 3.2. The row is the elapsed time (11 px, tabular, 60% white), the bar, and the length. The bar is a 14 px hit area with a 3 px track at 16% white and a white fill scaled from its left edge. In the lyrics layout the text column is 88 px, the cover's height: a two-line title (46 px), the artist (18 px), this row (14 px) and two 3 px gaps make 84 px, so it still fits.
+
+- The elapsed time is the last sampled position, extrapolated while a track plays (`positionAt` in `lib/lyrics.ts`), and clamped to the length. A timer ticks 4 times a second, and only while the panel shows the Media page and a track plays. Nothing ticks otherwise.
+- A click or a drag seeks (`media_seek`), and the bar shows the target until the next media update, or for 2 s if no update comes. The keyboard seeks 5 s with the arrow keys. The bar is `role="slider"` with `aria-valuenow`, `aria-valuemin`, `aria-valuemax` and an `aria-valuetext` of "elapsed of length". It takes a 2 px focus ring at 70% white, offset 2 px.
+- A drag keeps its pointer captured, so leaving the bar does not lose it. A drag that starts on the bar does not turn the page: `swipeStart` skips it, as it skips sliders.
+- The row is hidden when the length is unknown (zero, a live stream or no session), so nothing shows a bar that cannot seek.
+- Only `transform` animates. The fill eases between ticks, and a drag has no transition. Reduced motion has no transition at all, so the fill jumps.
 
 ### Lyrics transport
 Three round buttons: skip 60 px, play 68 px, glyphs 36 px and 40 px, 12 px gap, centred under the art.
@@ -504,7 +530,7 @@ Three round buttons: skip 60 px, play 68 px, glyphs 36 px and 40 px, 12 px gap, 
   The JavaScript check is read once when the module loads, so a change while the app runs needs a
   restart. Keep both in step when you add a motion.
 - Under reduced motion: shapes and pages change by fade only (150 ms) with no transform, the equaliser
-  bars are static, the HUD bar, the battery glyph and the ring jump instead of gliding, the timer digits crossfade over
+  bars are static, the HUD bar, the battery glyph, the media progress fill and the ring jump instead of gliding, the timer digits crossfade over
   150 ms, the ripple is hidden, the alert glow sits at 35%, the lyric line and stack do not rise, the
   spinner pulses instead of turning, and the tile press does not scale. The timer's mode change is a
   150 ms opacity crossfade in both settings, because it is a fade and carries no motion.
@@ -535,6 +561,7 @@ has a row in `src/settings/Settings.svelte`.
 | `battery` (`enabled`, `chargeAlerts`, `lowBatteryAlerts`) | on, on, on | Shows the battery pill for the charger, full charge and low-battery warnings. Settings > Battery. A PC with no battery shows nothing. |
 | `stats` (`enabled`) | on | Lets the Stats page show and be sampled. Settings > Stats. Off, the page is hidden and nothing is read. |
 | `focusMinutes`, `shortBreakMinutes`, `longBreakMinutes` | 25, 5, 15 | Pomodoro lengths. |
+| `hotkeys` (`enabled`, `playPause`, `nextTrack`, `previousTrack`, `timerToggle`) | off; Ctrl+Alt+Space, Ctrl+Alt+Right, Ctrl+Alt+Left, Ctrl+Alt+T | Global keys for play or pause, next, previous and the timer. Settings > Hotkeys. Nothing is registered while off, and an empty box leaves its action unbound. A conflict is shown under the action. |
 | `calendar` (`enabled`, `leadMinutes`, `allDayHour`) | on, 10, 9 | Reminders for the user's own events, and the Calendar page. Settings > Calendar sets the lead time (5, 10, 15, 30 or 60 min) and the hour all-day events are announced at. Events themselves are in `events.json`. Settings is the only place to change them: the island's Calendar page opens it for "Add note". |
 
 Decision on the idle clock: the idle pill is the only moment the notch is not doing something, so
@@ -606,6 +633,10 @@ changes.
 - The calendar reminder pill and page were checked in the browser harness, which drives
   `calendar://show`, `calendar://update` and `island://state`. The reminder times themselves (a real
   event firing at its start) are checked in `tauri dev`, not here.
+- The media progress line, the calendar snooze strip, and the Settings form's length and reminder chips were
+  not measured in the browser harness or in the Tauri window. Their sizes come from the code and this file, and
+  the snooze strip's layout (a 102 px body, with the strip in the bottom 30 px) needs a check on a real screen.
+- The Hotkeys section has no harness check. Its conflict line depends on what other apps hold.
 - The island month grid was checked in the browser harness only. The harness clicked the days and the
   arrows, and its "Add note" recorded the call. Not checked in the Tauri window: real pointer hits through
   the notch, the Settings window opening and scrolling to the calendar on a click, and whether the island

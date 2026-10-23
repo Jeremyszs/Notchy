@@ -5,7 +5,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { cubicOut } from "svelte/easing";
   import { fade, fly } from "svelte/transition";
-  import { calendarEvents, fetchBetween } from "./stores/calendar";
+  import { calendarEvents, fetchBetween, recentReminder, snooze } from "./stores/calendar";
   import { islandState } from "./stores/island";
   import { dateKey, shortDate, timeLabel, type EventInstance } from "./lib/calendar";
   import {
@@ -34,6 +34,7 @@
   let instances: EventInstance[] = [];
   let request = 0;
   let wasOpen = false;
+  let snoozeError = "";
 
   $: view = monthOf(selected);
   $: monthIndex = view.year * 12 + view.month;
@@ -41,11 +42,14 @@
   $: range = gridRange(rows);
   $: counts = noteCounts(instances);
   $: dayNotes = instancesOn(instances, selected);
-  $: shown = noteRows(dayNotes.length);
+  // The snooze strip takes the bottom row of the notes column, so its list keeps three rows.
+  $: shown = noteRows(dayNotes.length, $recentReminder ? 3 : undefined);
   // Reloads when the month changes, and when the event list changes. The old notes stay on screen until
   // the new ones arrive, so a refresh does not blank the grid.
   $: reload(range.from, range.to, $calendarEvents);
   $: onPanel($islandState === "expanded");
+  // A new reminder replaces the strip, so an error about the old one goes with it.
+  $: clearSnoozeError($recentReminder);
 
   // Opening the panel shows today, and reads the date again, since the panel can stay shut overnight.
   function onPanel(open: boolean): void {
@@ -81,6 +85,15 @@
   // Month change is by the arrows only. The wheel turns pages, so it never changes the month.
   function moveMonth(delta: number): void {
     select(shiftKeyByMonth(selected, delta));
+  }
+
+  // Snoozes the recent reminder. A failure is shown in the strip's title until a new reminder arrives.
+  async function snoozeBy(minutes: 5 | 10): Promise<void> {
+    snoozeError = (await snooze(minutes)) ?? "";
+  }
+
+  function clearSnoozeError(_reminder: unknown): void {
+    snoozeError = "";
   }
 
   function addNote(): void {
@@ -148,20 +161,33 @@
   </div>
 
   <div class="notes">
-    {#if dayNotes.length === 0}
-      <p class="empty">No notes</p>
-    {:else}
-      <ul class="list">
-        {#each dayNotes.slice(0, shown.shown) as note (`${note.eventId}|${note.start}`)}
-          <li class="note">
-            <span class="time">{timeLabel(note.start, note.allDay)}</span>
-            <span class="name">{note.title}</span>
-          </li>
-        {/each}
-        {#if shown.more > 0}
-          <li class="more">+{shown.more} more</li>
-        {/if}
-      </ul>
+    <div class="body">
+      {#if dayNotes.length === 0}
+        <p class="empty">No notes</p>
+      {:else}
+        <ul class="list">
+          {#each dayNotes.slice(0, shown.shown) as note (`${note.eventId}|${note.start}`)}
+            <li class="note">
+              <span class="time">{timeLabel(note.start, note.allDay)}</span>
+              <span class="name">{note.title}</span>
+            </li>
+          {/each}
+          {#if shown.more > 0}
+            <li class="more">+{shown.more} more</li>
+          {/if}
+        </ul>
+      {/if}
+    </div>
+    {#if $recentReminder}
+      <div class="snooze" role="group" aria-label="Snooze reminder">
+        <span class="snooze-title">{snoozeError || $recentReminder.title}</span>
+        <button type="button" class="snooze-btn" aria-label="Snooze 5 minutes" onclick={() => snoozeBy(5)}>
+          5 min
+        </button>
+        <button type="button" class="snooze-btn" aria-label="Snooze 10 minutes" onclick={() => snoozeBy(10)}>
+          10 min
+        </button>
+      </div>
     {/if}
   </div>
 </div>
@@ -357,15 +383,67 @@
     cursor: pointer;
   }
 
-  /* The notes body is the six grid rows' height, and its content is centred in it. */
+  /* The notes body is the six grid rows' height, and its content is centred in it. With the snooze strip
+     under it, the body gives up 30 px (a 6 px gap and the 24 px strip), so it holds three note rows. */
   .notes {
     grid-column: 3;
     grid-row: 5;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     min-width: 0;
     height: 102px;
+  }
+
+  .body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
+  }
+
+  /* One 24 px row under the notes: the reminder's title, then the two snooze buttons. The title shortens
+     with an ellipsis, and the buttons keep their width. */
+  .snooze {
+    display: flex;
+    align-items: center;
+    flex: none;
+    gap: 4px;
+    height: 24px;
+    margin-top: 6px;
+    min-width: 0;
+  }
+
+  .snooze-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 24px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  /* Accent text, as "Add note" is, so the buttons read as links on black (7.4:1). */
+  .snooze-btn {
+    flex: none;
+    height: 20px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 20px;
+    color: #ff6a3d;
+    cursor: pointer;
+  }
+
+  .snooze-btn:hover {
+    background: rgba(255, 106, 61, 0.14);
   }
 
   .empty {

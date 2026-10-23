@@ -89,6 +89,73 @@ pub struct Config {
     pub stats: Stats,
     /// Calendar reminders and the Calendar page.
     pub calendar: Calendar,
+    pub hotkeys: Hotkeys,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Hotkeys {
+    pub enabled: bool,
+    pub play_pause: String,
+    pub next_track: String,
+    pub previous_track: String,
+    pub timer_toggle: String,
+}
+
+impl Default for Hotkeys {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            play_pause: "Ctrl+Alt+Space".into(),
+            next_track: "Ctrl+Alt+Right".into(),
+            previous_track: "Ctrl+Alt+Left".into(),
+            timer_toggle: "Ctrl+Alt+T".into(),
+        }
+    }
+}
+
+impl Hotkeys {
+    pub fn bindings(&self) -> [(&'static str, &str); 4] {
+        [
+            ("playPause", &self.play_pause),
+            ("nextTrack", &self.next_track),
+            ("previousTrack", &self.previous_track),
+            ("timerToggle", &self.timer_toggle),
+        ]
+    }
+
+    fn sanitize(self) -> Self {
+        use tauri_plugin_global_shortcut::Shortcut;
+        let defaults = Self::default();
+        let mut used = Vec::new();
+        let mut clean = Vec::new();
+        for ((_, value), (_, fallback)) in self.bindings().into_iter().zip(defaults.bindings()) {
+            let mut value = value.trim().to_string();
+            if value.is_empty() {
+                clean.push(value);
+                continue;
+            }
+            let mut shortcut = value.parse::<Shortcut>().ok();
+            if shortcut.is_none() || shortcut.is_some_and(|key| used.contains(&key)) {
+                value = fallback.to_string();
+                shortcut = value.parse::<Shortcut>().ok();
+            }
+            if let Some(key) = shortcut.filter(|key| !used.contains(key)) {
+                used.push(key);
+            } else {
+                value.clear();
+            }
+            clean.push(value);
+        }
+        let [play_pause, next_track, previous_track, timer_toggle] = clean.try_into().unwrap();
+        Self {
+            enabled: self.enabled,
+            play_pause,
+            next_track,
+            previous_track,
+            timer_toggle,
+        }
+    }
 }
 
 /// The stats page's settings. Mirrors `stats` in src/stores/config.ts.
@@ -227,6 +294,7 @@ impl Default for Config {
             battery: Battery::default(),
             stats: Stats::default(),
             calendar: Calendar::default(),
+            hotkeys: Hotkeys::default(),
         }
     }
 }
@@ -271,6 +339,7 @@ impl Config {
             long_break_minutes: clamp_minutes(LONG_BREAK_MINUTES, self.long_break_minutes),
             notifications: self.notifications.sanitize(),
             calendar: self.calendar.sanitize(),
+            hotkeys: self.hotkeys.sanitize(),
             ..self
         }
     }
@@ -513,6 +582,9 @@ pub async fn config_set(app: AppHandle, config: Config) -> Result<Config, String
     } else {
         write_run_entry(next.launch_at_login)
     };
+    if previous.hotkeys != next.hotkeys {
+        crate::modules::hotkeys::reapply(&app);
+    }
     if previous.lyrics != next.lyrics {
         lyrics::reapply(&app);
     }
@@ -628,9 +700,60 @@ mod tests {
     }
 
     #[test]
+    fn old_config_gets_opt_in_hotkeys_and_partial_settings_keep_defaults() {
+        let old: Config = serde_json::from_str(r#"{"lyrics":false}"#).unwrap();
+        assert_eq!(old.hotkeys, Hotkeys::default());
+        assert!(!old.lyrics);
+        let partial: Config = serde_json::from_str(r#"{"hotkeys":{"enabled":true}}"#).unwrap();
+        assert!(partial.hotkeys.enabled);
+        assert_eq!(partial.hotkeys.play_pause, Hotkeys::default().play_pause);
+    }
+
+    #[test]
+    fn hotkeys_trim_fall_back_and_leave_blank_actions_unbound() {
+        let hotkeys = Hotkeys {
+            enabled: true,
+            play_pause: "  Ctrl+Alt+Space  ".into(),
+            next_track: "not a shortcut".into(),
+            previous_track: "  ".into(),
+            timer_toggle: "".into(),
+        }
+        .sanitize();
+        assert!(hotkeys.enabled);
+        assert_eq!(hotkeys.play_pause, "Ctrl+Alt+Space");
+        assert_eq!(hotkeys.next_track, "Ctrl+Alt+Right");
+        assert!(hotkeys.previous_track.is_empty());
+        assert!(hotkeys.timer_toggle.is_empty());
+        assert_eq!(hotkeys.clone().sanitize(), hotkeys);
+    }
+
+    #[test]
+    fn later_duplicate_hotkeys_fall_back_or_become_unbound() {
+        let hotkeys = Hotkeys {
+            play_pause: "Alt+Control+Right".into(),
+            next_track: "Ctrl+Alt+Right".into(),
+            previous_track: "Alt+Control+Right".into(),
+            ..Hotkeys::default()
+        }
+        .sanitize();
+        assert_eq!(hotkeys.play_pause, "Alt+Control+Right");
+        assert!(hotkeys.next_track.is_empty());
+        assert_eq!(hotkeys.previous_track, "Ctrl+Alt+Left");
+        assert_eq!(hotkeys.clone().sanitize(), hotkeys);
+    }
+
+    #[test]
     fn json_uses_camel_case_keys() {
         let json = serde_json::to_string(&Config::default()).unwrap();
         assert!(json.contains("\"confirmLock\":true"));
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value["hotkeys"],
+            serde_json::json!({
+                "enabled": false, "playPause": "Ctrl+Alt+Space", "nextTrack": "Ctrl+Alt+Right",
+                "previousTrack": "Ctrl+Alt+Left", "timerToggle": "Ctrl+Alt+T"
+            })
+        );
         assert!(json.contains("\"launchAtLogin\":false"));
         assert!(json.contains("\"pages\":[\"media\",\"controls\",\"timer\",\"stats\",\"calendar\"]"));
         assert!(json.contains("\"stats\":{\"enabled\":true}"));

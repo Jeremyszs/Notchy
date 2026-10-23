@@ -4,16 +4,23 @@ import {
   dateKey,
   dayLabel,
   describeEvent,
+  durationFrom,
   emptyForm,
+  eventInput,
+  formFromEvent,
   formStart,
   hasErrors,
   hourLabel,
   isValidDate,
+  isValidDuration,
   isValidTime,
   leadLabel,
+  lengthChoiceOf,
+  reminderChipLabel,
   relativeLabel,
   shortDate,
   timeLabel,
+  toggleReminder,
   upcomingRow,
   validateForm,
   type CalendarEvent,
@@ -148,4 +155,81 @@ test("the island row reads the day, the time and the title of an occurrence", ()
     time: "All day",
     title: "Standup",
   });
+});
+
+test("a length is a whole number of minutes from 1 to a day", () => {
+  assert.equal(isValidDuration(1), true);
+  assert.equal(isValidDuration(90), true);
+  assert.equal(isValidDuration(1440), true);
+  assert.equal(isValidDuration(0), false);
+  assert.equal(isValidDuration(1441), false);
+  assert.equal(isValidDuration(2.5), false);
+  assert.equal(isValidDuration(Number.NaN), false);
+});
+
+test("the length choice reads back as the form's option", () => {
+  assert.equal(lengthChoiceOf(null), "none");
+  assert.equal(lengthChoiceOf(45), "45");
+  assert.equal(lengthChoiceOf(50), "custom");
+  assert.equal(durationFrom("none", ""), null);
+  assert.equal(durationFrom("60", ""), 60);
+  assert.equal(durationFrom("custom", "75"), 75);
+  assert.equal(Number.isNaN(durationFrom("custom", "abc")), true);
+});
+
+test("a custom length outside the range is reported inline", () => {
+  const timed = { ...emptyForm("2026-10-23", "14:30"), title: "Long call", durationMinutes: 0 };
+  assert.equal(validateForm(timed).duration, "Length must be 1 to 1440 minutes.");
+  assert.equal(validateForm({ ...timed, durationMinutes: 240 }).duration, undefined);
+  // All-day events have no length, so a stale value is not checked.
+  assert.deepEqual(validateForm({ ...timed, allDay: true }), {});
+});
+
+test("reminders toggle on and off, stay sorted, and stop at five", () => {
+  assert.deepEqual(toggleReminder(null, 30), [30]);
+  assert.deepEqual(toggleReminder([30], 5), [5, 30]);
+  assert.deepEqual(toggleReminder([5, 30], 30), [5]);
+  assert.deepEqual(toggleReminder([], 10), [10]);
+  assert.deepEqual(toggleReminder([5, 10, 15, 30, 60], 1440), [5, 10, 15, 30, 60]);
+  assert.deepEqual(toggleReminder([5, 10, 15, 30, 60], 5), [10, 15, 30, 60]);
+});
+
+test("reminder chips read as short words", () => {
+  assert.equal(reminderChipLabel(5), "5 min");
+  assert.equal(reminderChipLabel(60), "1 hour");
+  assert.equal(reminderChipLabel(1440), "1 day");
+});
+
+test("the backend input carries the length and reminders of a timed event", () => {
+  const form = {
+    ...emptyForm("2026-10-23", "14:30"),
+    title: "  Standup  ",
+    durationMinutes: 30,
+    remindBeforeMinutes: [5, 60],
+  };
+  assert.deepEqual(eventInput(form, null), {
+    id: null,
+    title: "Standup",
+    notes: "",
+    start: "2026-10-23T14:30",
+    allDay: false,
+    recurrence: "none",
+    durationMinutes: 30,
+    remindBeforeMinutes: [5, 60],
+  });
+  // An all-day event sends neither, whatever the form still holds.
+  const allDay = eventInput({ ...form, allDay: true }, "e1");
+  assert.equal(allDay.durationMinutes, null);
+  assert.equal(allDay.remindBeforeMinutes, null);
+  assert.equal(allDay.id, "e1");
+});
+
+test("editing an event starts the form from its length and reminders", () => {
+  const stored = event({ durationMinutes: 45, remindBeforeMinutes: [] });
+  const form = formFromEvent(stored);
+  assert.equal(form.durationMinutes, 45);
+  assert.deepEqual(form.remindBeforeMinutes, []);
+  const fresh = emptyForm("2026-10-23", "09:00");
+  assert.equal(fresh.durationMinutes, null);
+  assert.equal(fresh.remindBeforeMinutes, null);
 });

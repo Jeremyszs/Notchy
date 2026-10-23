@@ -96,6 +96,9 @@ pub fn minutes_until(start: PrimitiveDateTime, now: PrimitiveDateTime) -> i64 {
 pub struct Reminders {
     fired: BTreeMap<String, PrimitiveDateTime>,
     changed: bool,
+    last: Option<(Trigger, PrimitiveDateTime)>,
+    snoozed: Vec<Trigger>,
+    snooze_seq: u64,
 }
 
 impl Reminders {
@@ -103,7 +106,7 @@ impl Reminders {
     pub fn from_fired(fired: BTreeMap<String, PrimitiveDateTime>) -> Self {
         Self {
             fired,
-            changed: false,
+            ..Self::default()
         }
     }
 
@@ -128,13 +131,68 @@ impl Reminders {
             self.changed = true;
             due.push(trigger.clone());
         }
+        self.snoozed.retain(|trigger| {
+            if trigger.at > now {
+                return true;
+            }
+            if now - trigger.at < OVERDUE_LIMIT {
+                due.push(trigger.clone());
+            }
+            false
+        });
+        due.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.key.cmp(&b.key)));
+        if let Some(trigger) = due.last() {
+            self.last = Some((trigger.clone(), now));
+        }
         due
+    }
+
+    pub fn recent(&self, now: PrimitiveDateTime) -> Option<RecentReminder> {
+        let (trigger, fired) = self.last.as_ref()?;
+        let remaining = *fired + Duration::minutes(30) - now;
+        (remaining > Duration::ZERO).then(|| RecentReminder {
+            title: trigger.title.clone(),
+            expires_in_ms: u64::try_from(remaining.whole_milliseconds()).unwrap_or(0),
+        })
+    }
+
+    pub fn expiry(&self, now: PrimitiveDateTime) -> Option<PrimitiveDateTime> {
+        self.recent(now)?;
+        self.last
+            .as_ref()
+            .map(|(_, fired)| *fired + Duration::minutes(30))
+    }
+
+    pub fn expire(&mut self, now: PrimitiveDateTime) -> bool {
+        if self.last.is_some() && self.recent(now).is_none() {
+            self.last = None;
+            return true;
+        }
+        false
+    }
+
+    pub fn snooze(&mut self, minutes: u32, now: PrimitiveDateTime) -> bool {
+        if ![5, 10].contains(&minutes) || self.recent(now).is_none() {
+            return false;
+        }
+        let Some(at) = now.checked_add(Duration::minutes(i64::from(minutes))) else {
+            return false;
+        };
+        let (mut trigger, _) = self.last.take().unwrap();
+        self.snooze_seq += 1;
+        trigger.key = format!("{}|snooze|{}", trigger.key, self.snooze_seq);
+        trigger.at = at;
+        trigger.start = at;
+        trigger.kind = Kind::Start;
+        self.snoozed.push(trigger);
+        true
     }
 
     /// The moment of the next trigger that is still ahead and has not fired, or None.
     pub fn next(&self, now: PrimitiveDateTime, triggers: &[Trigger]) -> Option<PrimitiveDateTime> {
         triggers
             .iter()
+            .chain(self.snoozed.iter())
             .filter(|trigger| trigger.at > now && !self.fired.contains_key(&trigger.key))
             .map(|trigger| trigger.at)
             .min()
@@ -151,6 +209,13 @@ impl Reminders {
     pub fn take_changed(&mut self) -> bool {
         std::mem::take(&mut self.changed)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentReminder {
+    pub title: String,
+    pub expires_in_ms: u64,
 }
 
 /// One reminder on screen. Mirrors `CalendarNotice` in src/lib/calendar.ts. `seq` counts up from one,
@@ -265,6 +330,98 @@ mod tests {
 
     fn keys(triggers: &[Trigger]) -> Vec<String> {
         triggers.iter().map(|t| t.key.clone()).collect()
+    }
+
+    #[test]
+    fn snoozes_fire_once_after_five_or_ten_minutes_and_survive_prune() {
+        for minutes in [5, 10] {
+            let now = datetime!(2026-10-23 14:30);
+            let original = triggers(&[instance("a", now, false)], 10, 9);
+            let mut reminders = Reminders::default();
+            assert_eq!(reminders.due(now, &original).len(), 1);
+            let fired = reminders.fired().clone();
+            assert!(reminders.snooze(minutes, now));
+            assert_eq!(reminders.recent(now), None);
+            assert!(!reminders.snooze(minutes, now));
+            let at = now + Duration::minutes(i64::from(minutes));
+            assert_eq!(reminders.next(now, &[]), Some(at));
+            reminders.prune(now);
+            assert!(reminders.due(at - Duration::seconds(1), &[]).is_empty());
+            let due = reminders.due(at, &[]);
+            assert_eq!(due.len(), 1);
+            assert!(due[0].key.contains("|snooze|"));
+            assert_eq!(due[0].title, "Event a");
+            assert_eq!(due[0].kind, Kind::Start);
+            assert_eq!(minutes_until(due[0].start, at), 0);
+            assert!(reminders.due(at, &[]).is_empty());
+            assert_eq!(reminders.fired(), &fired, "snoozes are never persisted");
+            assert_eq!(reminders.recent(at).unwrap().expires_in_ms, 30 * 60_000);
+        }
+    }
+
+    #[test]
+    fn snooze_requires_allowed_minutes_and_a_recent_trigger() {
+        let now = datetime!(2026-10-23 14:30);
+        let mut reminders = Reminders::default();
+        assert!(!reminders.snooze(5, now));
+        reminders.due(now, &triggers(&[instance("a", now, false)], 10, 9));
+        for minutes in [0, 1, 6, 30, u32::MAX] {
+            assert!(!reminders.snooze(minutes, now));
+        }
+        assert_eq!(reminders.expiry(now), Some(now + Duration::minutes(30)));
+        assert!(
+            reminders
+                .recent(now + Duration::minutes(30) - Duration::milliseconds(1))
+                .is_some()
+        );
+        let expiry = now + Duration::minutes(30);
+        assert_eq!(reminders.recent(expiry), None);
+        assert!(!reminders.snooze(5, expiry));
+        assert!(reminders.expire(expiry));
+        assert!(!reminders.expire(expiry));
+        assert_eq!(reminders.expiry(expiry), None);
+    }
+
+    #[test]
+    fn the_newest_due_reminder_replaces_the_recent_one() {
+        let now = datetime!(2026-10-23 14:30);
+        let mut reminders = Reminders::default();
+        reminders.due(now, &triggers(&[instance("a", now, false)], 10, 9));
+        let later = now + Duration::minutes(1);
+        reminders.due(later, &triggers(&[instance("b", later, false)], 10, 9));
+        assert_eq!(reminders.recent(later).unwrap().title, "Event b");
+        assert_eq!(
+            serde_json::to_value(reminders.recent(later)).unwrap(),
+            serde_json::json!({"title": "Event b", "expiresInMs": 1_800_000})
+        );
+        assert!(reminders.snooze(5, later));
+        assert_eq!(
+            reminders.due(later + Duration::minutes(5), &[])[0].title,
+            "Event b"
+        );
+    }
+
+    #[test]
+    fn a_snoozed_reminder_uses_the_same_queue_and_overdue_limit() {
+        let wall = datetime!(2026-10-23 14:30);
+        let instant = Instant::now();
+        let mut reminders = Reminders::default();
+        let trigger = reminders
+            .due(wall, &triggers(&[instance("a", wall, false)], 10, 9))
+            .remove(0);
+        let mut queue = Queue::default();
+        assert_eq!(queue.push(&trigger, 0, instant).len(), 1);
+        assert!(reminders.snooze(5, wall));
+        let at = wall + Duration::minutes(5);
+        let snoozed = reminders.due(at, &[]).remove(0);
+        assert!(queue.push(&snoozed, 0, instant).is_empty());
+        let steps = queue.advance(instant + START_SHOW_FOR);
+        assert!(
+            matches!(&steps[..], [Step::Show(notice)] if notice.title == "Event a" && notice.minutes_until == 0)
+        );
+        assert!(reminders.snooze(10, at));
+        assert!(reminders.due(at + Duration::minutes(15), &[]).is_empty());
+        assert_eq!(reminders.next(at + Duration::minutes(15), &[]), None);
     }
 
     #[test]

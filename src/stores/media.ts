@@ -47,3 +47,6 @@ export const mediaState = readable<MediaState>(NOTHING_PLAYING, (set) => {
 export const playPause = () => invoke<void>("media_play_pause");
 export const next = () => invoke<void>("media_next");
 export const previous = () => invoke<void>("media_previous");
+// Moves playback to positionMs, from the start of the track. A player that cannot seek ignores it.
+export const seekTo = (positionMs: number) =>
+  invoke<void>("media_seek", { positionMs: Math.max(0, Math.round(positionMs)) });

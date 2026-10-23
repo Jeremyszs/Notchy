@@ -21,6 +21,16 @@ export interface Config {
   battery: BatterySettings;
   stats: StatsSettings;
   calendar: CalendarSettings;
+  hotkeys: HotkeySettings;
+}
+
+// Mirrors Hotkeys in config.rs. An empty accelerator leaves that action unbound.
+export interface HotkeySettings {
+  enabled: boolean;
+  playPause: string;
+  nextTrack: string;
+  previousTrack: string;
+  timerToggle: string;
 }
 
 // Mirrors Stats in config.rs.
@@ -76,6 +86,13 @@ export const DEFAULT_CONFIG: Config = {
   battery: { enabled: true, chargeAlerts: true, lowBatteryAlerts: true },
   stats: { enabled: true },
   calendar: { enabled: true, leadMinutes: 10, allDayHour: 9 },
+  hotkeys: {
+    enabled: false,
+    playPause: "Ctrl+Alt+Space",
+    nextTrack: "Ctrl+Alt+Right",
+    previousTrack: "Ctrl+Alt+Left",
+    timerToggle: "Ctrl+Alt+T",
+  },
 };
 
 const store = writable<Config>(DEFAULT_CONFIG);

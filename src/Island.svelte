@@ -27,6 +27,7 @@
   import { lastFinish, timerState, timerView, addTime, dismissTimer } from "./stores/timer";
   import { config } from "./stores/config";
   import CalendarPage from "./CalendarPage.svelte";
+  import MediaProgress from "./MediaProgress.svelte";
   import ControlsPage from "./ControlsPage.svelte";
   import IdleClock from "./IdleClock.svelte";
   import RollingClock from "./RollingClock.svelte";
@@ -192,8 +193,8 @@
   }
 
   function swipeStart(event: PointerEvent) {
-    // Sliders keep their own drags, so a press on an input never starts a swipe.
-    swipeFrom = (event.target as Element).closest("input")
+    // Sliders and the progress bar keep their own drags, so a press on one never starts a swipe.
+    swipeFrom = (event.target as Element).closest("input, [role='slider']")
       ? null
       : { x: event.clientX, y: event.clientY };
   }
@@ -598,6 +599,7 @@
                     <div class="meta">
                       <div class="title">{$mediaState.title}</div>
                       <div class="artist">{$mediaState.artist}</div>
+                      <MediaProgress />
                     </div>
                   </div>
                   <div class="lyric">
@@ -682,6 +684,7 @@
               <div class="meta">
                 <div class="heading">{$mediaState.title}</div>
                 <div class="artist">{$mediaState.artist}</div>
+                <MediaProgress />
               </div>
             </div>
             {@render transport(true)}

@@ -9,6 +9,7 @@ edition = "2024"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+tauri-plugin-global-shortcut = "2"
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 base64 = "0.22"

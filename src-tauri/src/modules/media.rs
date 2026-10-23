@@ -55,10 +55,11 @@ pub struct MediaUpdate {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Control {
+pub(crate) enum Control {
     PlayPause,
     Next,
     Previous,
+    Seek(u64),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -232,7 +233,27 @@ fn run_control(session: &Session, control: Control) {
         Control::PlayPause => wait(session.TryTogglePlayPauseAsync()),
         Control::Next => wait(session.TrySkipNextAsync()),
         Control::Previous => wait(session.TrySkipPreviousAsync()),
+        Control::Seek(ms) => {
+            let duration = session
+                .GetTimelineProperties()
+                .ok()
+                .and_then(|timeline| timeline.EndTime().ok())
+                .map_or(0, |end| ticks_to_ms(end.Duration));
+            if duration == 0 {
+                return;
+            }
+            wait(session.TryChangePlaybackPositionAsync(seek_ticks(ms, duration)))
+        }
     };
+}
+
+fn seek_ticks(ms: u64, duration_ms: u64) -> i64 {
+    let ms = if duration_ms > 0 {
+        ms.min(duration_ms)
+    } else {
+        ms
+    };
+    ms.saturating_mul(10_000).min(i64::MAX as u64) as i64
 }
 
 /// The session shown and controlled: the first one playing, else the current one, else none.
@@ -461,7 +482,7 @@ impl Drop for ComGuard {
     }
 }
 
-fn send_control(app: &AppHandle, control: Control) {
+pub(crate) fn send_control(app: &AppHandle, control: Control) {
     if let Some(hub) = app.try_state::<Arc<MediaHub>>() {
         let _ = hub.commands.send(Message::Control(control));
     }
@@ -486,6 +507,11 @@ pub async fn media_previous(app: AppHandle) {
 }
 
 #[tauri::command]
+pub async fn media_seek(app: AppHandle, position_ms: u64) {
+    send_control(&app, Control::Seek(position_ms));
+}
+
+#[tauri::command]
 pub fn media_snapshot(app: AppHandle) -> MediaUpdate {
     app.try_state::<Arc<MediaHub>>()
         .map(|hub| {
@@ -502,6 +528,14 @@ mod tests {
     use super::*;
 
     const PNG_HEADER: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+    #[test]
+    fn seek_conversion_clamps_and_saturates() {
+        assert_eq!(seek_ticks(123, 0), 1_230_000);
+        assert_eq!(seek_ticks(200, 100), 1_000_000);
+        assert_eq!(seek_ticks(0, 100), 0);
+        assert_eq!(seek_ticks(u64::MAX, 0), i64::MAX);
+    }
 
     #[test]
     fn sniffs_jpeg() {

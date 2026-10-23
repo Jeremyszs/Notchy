@@ -42,6 +42,13 @@ export interface CalendarNotice {
 
 export const EMPTY_NOTICE: CalendarNotice = { seq: 0, title: "", minutesUntil: 0 };
 
+/** The reminder a snooze can still reach. Mirrors RecentReminder in src-tauri/src/modules/calendar. */
+export interface RecentReminder {
+  title: string;
+  /** Milliseconds left before the snooze window closes. */
+  expiresInMs: number;
+}
+
 /** The form in Settings. `date` and `time` are the native input values. */
 export interface EventForm {
   title: string;
@@ -50,16 +57,48 @@ export interface EventForm {
   time: string;
   allDay: boolean;
   recurrence: Recurrence;
+  /** Minutes the event lasts, or null for no length. Timed events only. */
+  durationMinutes: number | null;
+  /** Minutes before the start to remind, or null for the Settings lead time. An empty list is the start only. */
+  remindBeforeMinutes: number[] | null;
 }
 
 export interface FormErrors {
   title?: string;
   date?: string;
   time?: string;
+  duration?: string;
+}
+
+/** What Settings sends to calendar_upsert. Mirrors EventInput in src-tauri/src/modules/calendar/model.rs. */
+export interface EventInput {
+  id: string | null;
+  title: string;
+  notes: string;
+  start: string;
+  allDay: boolean;
+  recurrence: Recurrence;
+  durationMinutes: number | null;
+  remindBeforeMinutes: number[] | null;
 }
 
 /** The lead times the Settings window offers, in minutes. Mirrors LEAD_CHOICES in config.rs. */
 export const LEAD_OPTIONS = [5, 10, 15, 30, 60] as const;
+
+/** The snooze lengths the Calendar page offers, in minutes. Mirrors the backend's accepted values. */
+export const SNOOZE_OPTIONS = [5, 10] as const;
+
+/** The lengths the form offers, in minutes. "Custom" takes any whole number up to the maximum. */
+export const LENGTH_OPTIONS = [15, 30, 45, 60, 90, 120] as const;
+
+/** The longest length an event can have, one day. Mirrors the backend's check. */
+export const MAX_DURATION_MINUTES = 1440;
+
+/** The per-event reminders the form offers, in minutes. */
+export const REMIND_OPTIONS = [5, 10, 15, 30, 60, 1440] as const;
+
+/** The most reminders one event can have. Mirrors the backend's check. */
+export const REMIND_MAX = 5;
 
 const REPEAT_WORDS: Record<Recurrence, string> = {
   none: "",
@@ -173,9 +212,18 @@ export function hourLabel(hour: number): string {
   return `${String(hour).padStart(2, "0")}:00`;
 }
 
-/** A blank form for a new event, on `date` at `time`. */
+/** A blank form for a new event, on `date` at `time`. It has no length and the Settings lead time. */
 export function emptyForm(date: string, time: string): EventForm {
-  return { title: "", notes: "", date, time, allDay: false, recurrence: "none" };
+  return {
+    title: "",
+    notes: "",
+    date,
+    time,
+    allDay: false,
+    recurrence: "none",
+    durationMinutes: null,
+    remindBeforeMinutes: null,
+  };
 }
 
 /** The form that edits an existing event. */
@@ -187,7 +235,41 @@ export function formFromEvent(event: CalendarEvent): EventForm {
     time: timePart(event.start),
     allDay: event.allDay,
     recurrence: event.recurrence,
+    durationMinutes: event.durationMinutes,
+    remindBeforeMinutes: event.remindBeforeMinutes,
   };
+}
+
+/** Whether `minutes` is a whole length from 1 to MAX_DURATION_MINUTES. */
+export function isValidDuration(minutes: number): boolean {
+  return Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_DURATION_MINUTES;
+}
+
+/** The length the form's choice stands for. "none" is no length, a number is that many minutes. */
+export function durationFrom(choice: string, custom: string): number | null {
+  if (choice === "none") return null;
+  return Number(choice === "custom" ? custom : choice);
+}
+
+/** The form's length choice for a stored length: "none", the minutes as text, or "custom". */
+export function lengthChoiceOf(minutes: number | null): string {
+  if (minutes === null) return "none";
+  return (LENGTH_OPTIONS as readonly number[]).includes(minutes) ? String(minutes) : "custom";
+}
+
+/** Adds or removes one reminder, keeping the list sorted and at most REMIND_MAX long. */
+export function toggleReminder(current: number[] | null, minutes: number): number[] {
+  const list = current ?? [];
+  if (list.includes(minutes)) return list.filter((lead) => lead !== minutes);
+  if (list.length >= REMIND_MAX) return list;
+  return [...list, minutes].sort((a, b) => a - b);
+}
+
+/** A reminder choice as a short chip label, such as "5 min", "1 hour" or "1 day". */
+export function reminderChipLabel(minutes: number): string {
+  if (minutes === 60) return "1 hour";
+  if (minutes === 1440) return "1 day";
+  return `${minutes} min`;
 }
 
 /** The checks the form shows inline. The backend checks the same things again. */
@@ -196,6 +278,9 @@ export function validateForm(form: EventForm): FormErrors {
   if (form.title.trim() === "") errors.title = "Give the event a title.";
   if (!isValidDate(form.date)) errors.date = "Pick a date.";
   if (!form.allDay && !isValidTime(form.time)) errors.time = "Pick a time.";
+  if (!form.allDay && form.durationMinutes !== null && !isValidDuration(form.durationMinutes)) {
+    errors.duration = `Length must be 1 to ${MAX_DURATION_MINUTES} minutes.`;
+  }
   return errors;
 }
 
@@ -207,6 +292,23 @@ export function hasErrors(errors: FormErrors): boolean {
 /** The start the backend expects. An all-day event is held to midnight. */
 export function formStart(form: EventForm): string {
   return `${form.date}T${form.allDay ? "00:00" : form.time}`;
+}
+
+/**
+ * What the backend is sent for a form. An all-day event has one reminder and no length, so both
+ * fields are null for it, as the backend expects.
+ */
+export function eventInput(form: EventForm, id: string | null): EventInput {
+  return {
+    id,
+    title: form.title.trim(),
+    notes: form.notes,
+    start: formStart(form),
+    allDay: form.allDay,
+    recurrence: form.recurrence,
+    durationMinutes: form.allDay ? null : form.durationMinutes,
+    remindBeforeMinutes: form.allDay ? null : form.remindBeforeMinutes,
+  };
 }
 
 /** One row of the island's Calendar page. */

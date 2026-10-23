@@ -6,6 +6,7 @@ import {
   type CalendarEvent,
   type CalendarNotice,
   type EventInstance,
+  type RecentReminder,
 } from "../lib/calendar";
 
 // The Rust side owns the reminder queue and decides when the calendar state starts and ends (see
@@ -47,3 +48,34 @@ export const calendarEvents = readable<CalendarEvent[]>([], (set) => {
     unlisten.then((stop) => stop());
   };
 });
+
+// The reminder a snooze can still reach, or null. The Rust side sends it when a reminder fires, when it is
+// snoozed (null again) and when its 30 minutes run out (null). It is read once on subscribe.
+export const recentReminder = readable<RecentReminder | null>(null, (set) => {
+  let heard = false;
+  const unlisten = listen<RecentReminder | null>("calendar://recent", (event) => {
+    heard = true;
+    set(event.payload);
+  });
+  invoke<RecentReminder | null>("calendar_recent_reminder").then(
+    (snapshot) => {
+      // An update that arrived first is newer than this snapshot, so it is kept.
+      if (!heard) set(snapshot);
+    },
+    () => {},
+  );
+
+  return () => {
+    unlisten.then((stop) => stop());
+  };
+});
+
+// Snoozes the recent reminder by 5 or 10 minutes. Resolves to the error text the person should read, or null.
+export async function snooze(minutes: 5 | 10): Promise<string | null> {
+  try {
+    await invoke<void>("calendar_snooze", { minutes });
+    return null;
+  } catch (error) {
+    return String(error);
+  }
+}
