@@ -23,6 +23,9 @@ pub enum IslandState {
     /// A transient overlay is up, such as the volume and brightness HUD. Slim, and gone after a
     /// moment. Its content travels on its own event; this state only says it is on screen.
     Hud,
+    /// Another app's toast notification, shown for a few seconds. A transient like the HUD. Its
+    /// content travels on `notifications://show`; this state only says it is on screen.
+    Notification,
     /// An activity wants attention, such as a timer that just ran out. A card that holds for a
     /// few seconds, and stays until its owner clears the alert. Its content travels on the
     /// owner's event.
@@ -41,6 +44,7 @@ impl IslandState {
             Self::Expanded => (380.0, 192.0),
             Self::Lyrics => (620.0, 224.0),
             Self::Hud => (260.0, 30.0),
+            Self::Notification => (260.0, 30.0),
             Self::Alert => (320.0, 64.0),
             Self::Tucked => (64.0, 5.0),
             Self::Hidden => (0.0, 0.0),
@@ -64,6 +68,7 @@ pub struct Inputs {
     pub covered: bool,
     pub wide: bool,
     pub transient: bool,
+    pub notification: bool,
     pub activity: bool,
     pub alert: bool,
 }
@@ -72,12 +77,15 @@ pub struct Inputs {
 ///
 /// 1. Fullscreen hides everything.
 /// 2. An alert card shows, even over the pointer. It holds for a few seconds, and the pointer
-///    cannot push it aside, so its buttons stay where they are.
+///    cannot push it aside, so its buttons stay where they are. A timer alert outranks a
+///    notification, so an incoming message never hides a finished countdown.
 /// 3. Hover expands (to the lyrics layout when it is wide).
 /// 4. A transient overlay (the HUD) shows over the rest.
-/// 5. A covered notch tucks, even while an activity runs.
-/// 6. A live activity owns the compact pill, in place of media.
-/// 7. Media shows the active pill, and otherwise the island idles.
+/// 5. A notification shows under the HUD, so a volume or brightness change is never hidden by a
+///    message. Like the HUD, it shows over a covered notch.
+/// 6. A covered notch tucks, even while an activity runs.
+/// 7. A live activity owns the compact pill, in place of media.
+/// 8. Media shows the active pill, and otherwise the island idles.
 pub fn resolve(inputs: Inputs) -> IslandState {
     if inputs.fullscreen {
         IslandState::Hidden
@@ -89,6 +97,8 @@ pub fn resolve(inputs: Inputs) -> IslandState {
         IslandState::Expanded
     } else if inputs.transient {
         IslandState::Hud
+    } else if inputs.notification {
+        IslandState::Notification
     } else if inputs.covered {
         IslandState::Tucked
     } else if inputs.activity {
@@ -108,6 +118,7 @@ pub struct IslandStateMachine {
     covered: bool,
     wide: bool,
     transient: bool,
+    notification: bool,
     activity: Option<ActivityKind>,
     alert: Option<ActivityKind>,
 }
@@ -121,6 +132,7 @@ impl IslandStateMachine {
             covered: self.covered,
             wide: self.wide,
             transient: self.transient,
+            notification: self.notification,
             activity: self.activity.is_some(),
             alert: self.alert.is_some(),
         })
@@ -149,6 +161,11 @@ impl IslandStateMachine {
     /// Whether a transient overlay (the HUD) is on screen. Owned by `modules::hud`.
     pub fn set_transient(&mut self, transient: bool) {
         self.transient = transient;
+    }
+
+    /// Whether a notification is on screen. Owned by `modules::notifications`.
+    pub fn set_notification(&mut self, notification: bool) {
+        self.notification = notification;
     }
 
     /// The live activity that owns the compact pill, or None. Owned by its module.
@@ -202,7 +219,7 @@ mod tests {
 
     /// Each precedence rung as the inputs that trigger it on their own, and the state it gives.
     /// Listed highest first, the same order as `resolve`.
-    fn rungs() -> [(Inputs, IslandState); 8] {
+    fn rungs() -> [(Inputs, IslandState); 9] {
         use IslandState::*;
         let base = Inputs::default();
         [
@@ -214,6 +231,7 @@ mod tests {
             ),
             (Inputs { hovered: true, ..base }, Expanded),
             (Inputs { transient: true, ..base }, Hud),
+            (Inputs { notification: true, ..base }, Notification),
             (Inputs { covered: true, ..base }, Tucked),
             (Inputs { activity: true, ..base }, Activity),
             (Inputs { media_playing: true, ..base }, Active),
@@ -228,6 +246,7 @@ mod tests {
             covered: a.covered || b.covered,
             wide: a.wide || b.wide,
             transient: a.transient || b.transient,
+            notification: a.notification || b.notification,
             activity: a.activity || b.activity,
             alert: a.alert || b.alert,
         }
@@ -241,7 +260,7 @@ mod tests {
         }
     }
 
-    /// Whenever two rungs are on together, the higher one wins. Checks all 28 pairs.
+    /// Whenever two rungs are on together, the higher one wins. Checks all 36 pairs.
     #[test]
     fn a_higher_rung_always_beats_a_lower_one() {
         let rungs = rungs();
@@ -352,10 +371,51 @@ mod tests {
         machine.set_covered(true);
         machine.set_wide(true);
         machine.set_transient(true);
+        machine.set_notification(true);
         machine.set_activity(Some(ActivityKind::Timer));
         machine.set_alert(Some(ActivityKind::Timer));
         machine.set_fullscreen(true);
         assert_eq!(machine.current(), IslandState::Hidden);
+    }
+
+    /// A notification shows over a tucked or playing island and gives way when it ends, as the HUD does.
+    #[test]
+    fn notification_shows_over_tucked_and_active_then_returns() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_covered(true);
+        machine.set_media_playing(true);
+        machine.set_notification(true);
+        assert_eq!(machine.current(), IslandState::Notification);
+
+        machine.set_notification(false);
+        assert_eq!(machine.current(), IslandState::Tucked);
+    }
+
+    /// A timer alert and the HUD outrank a notification, and hover outranks it too.
+    #[test]
+    fn alert_and_hud_outrank_a_notification_and_hover_outranks_it() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_notification(true);
+        machine.set_activity(Some(ActivityKind::Timer));
+        machine.set_alert(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Alert);
+
+        machine.set_alert(None);
+        assert_eq!(machine.current(), IslandState::Notification);
+
+        machine.set_transient(true);
+        assert_eq!(machine.current(), IslandState::Hud);
+
+        machine.set_transient(false);
+        machine.set_hovered(true);
+        assert_eq!(machine.current(), IslandState::Expanded);
+    }
+
+    #[test]
+    fn notification_pill_is_compact_and_fits_the_window() {
+        assert_eq!(IslandState::Notification.pill_size(), (260.0, 30.0));
+        let (w, h) = IslandState::Notification.pill_size();
+        assert!(w <= 720.0 && h <= 240.0);
     }
 
     /// A running timer takes the compact pill from the media pill, and gives it back when it ends.

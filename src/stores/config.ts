@@ -17,6 +17,14 @@ export interface Config {
   focusMinutes: number;
   shortBreakMinutes: number;
   longBreakMinutes: number;
+  notifications: NotificationSettings;
+}
+
+// Mirrors Notifications in config.rs. Apps seen so far are not here: they live in their own file.
+export interface NotificationSettings {
+  enabled: boolean;
+  /** AppUserModelIds whose notifications are ignored. */
+  deniedApps: string[];
 }
 
 // The backend defaults. The notch uses them until the first answer arrives.
@@ -42,6 +50,7 @@ export const DEFAULT_CONFIG: Config = {
   focusMinutes: 25,
   shortBreakMinutes: 5,
   longBreakMinutes: 15,
+  notifications: { enabled: true, deniedApps: [] },
 };
 
 const store = writable<Config>(DEFAULT_CONFIG);

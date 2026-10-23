@@ -11,6 +11,7 @@ pub mod controls;
 pub mod hud;
 pub mod lyrics;
 pub mod media;
+pub mod notifications;
 pub mod timer;
 
 use tauri::{AppHandle, Manager};
@@ -35,11 +36,12 @@ pub fn start_all(app: &AppHandle) {
         app: app.clone(),
         island: app.state::<SharedIsland>().inner().clone(),
     };
-    let modules: [&dyn Module; 5] = [
+    let modules: [&dyn Module; 6] = [
         &media::MediaModule,
         &lyrics::LyricsModule,
         &context::ContextModule,
         &hud::HudModule,
+        &notifications::NotificationsModule,
         &timer::TimerModule,
     ];
     for module in modules {

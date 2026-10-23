@@ -16,6 +16,7 @@ serde_json = "1"
 ureq = "3"
 windows-core = "0.62"
 windows = { version = "0.62", features = [
+    "ApplicationModel",
     "Devices_Bluetooth",
     "Devices_Enumeration",
     "Devices_Radios",
@@ -24,6 +25,8 @@ windows = { version = "0.62", features = [
     "Media_Control",
     "Networking_Connectivity",
     "Storage_Streams",
+    "UI_Notifications",
+    "UI_Notifications_Management",
     "Win32_Devices_Display",
     "Win32_Foundation",
     "Win32_Graphics_Dwm",

@@ -34,6 +34,7 @@ largest pill is the lyrics layout.
 | `active` (media) | 200 x 30 | 10 | 15 | same |
 | `activity` (timer) | 220 x 30 | 10 | 15 | same |
 | `hud` | 260 x 30 | 10 | 15 | same |
+| `notification` (another app's toast) | 260 x 30 | 10 | 15 | same |
 | `alert` (timer finished) | 320 x 64 | 10 | 24 | same |
 | `expanded` (panel) | 380 x 192 | 10 | 24 | same |
 | `lyrics` (wide panel) | 620 x 224 | 10 | 24 | same |
@@ -135,8 +136,14 @@ y 224 .............................
 ### 3.4 Compact pills (30 px tall, 64 for alert)
 
 - Every pill centres its content vertically with `align-items: center` in the full body height.
-  Measured gaps above and below: active 5/5, activity 7/7, HUD 6/6, alert 16/16, idle clock 9/9.
+  Measured gaps above and below: active 5/5, activity 7/7, HUD 6/6, alert 16/16, idle clock 9/9,
+  notification 7/7.
 - Side insets are equal left and right for each pill: active 10, activity 12, HUD 14, alert 12.
+- **Notification pill.** Three columns, `16px | 8px gap | 1fr | 8px gap | 16px`, with 12 px side
+  padding. The badge sits in the first column and the text in the middle one, and the last column is
+  an empty 16 px that mirrors the badge, so the text centre is the pill centre (measured: both at the
+  window centre). The text is one line, 12 px, with the title at 600 and 90% white and the body at
+  400 and 60% white. A long line fades out with an ellipsis, and a title-only notice has no body span.
 - **The middle is never empty.** See section 8, rule 1.
 
 ### 3.5 Measuring a layout
@@ -209,6 +216,7 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Alert | the finished timer's palette | | ring, glow and the strong button |
 | Media (active pill) | white bars and title | | no accent: the artwork is the colour |
 | Media (lyrics tint) | hue from the album art, saturation 45 to 75%, lightness 28 to 40% (`src/lib/tint.ts`) | | fades to `#000` by 85% of the height |
+| Notification (pill) | `#0A84FF` | `#64D2FF` | blue. The badge only: the text stays white |
 | Volume (HUD) | `#7DD3FC` | `#FFFFFF` | ice |
 | Brightness (HUD and icon) | `#FFD166` | `#FFF3C4` | amber |
 | Mute slash | `#FF6B6B` | | HUD and quick-control icons |
@@ -238,6 +246,7 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Lyrics tint crossfade | 400 ms | | opacity |
 | HUD bar | 120 ms | ease-out | transform scaleX |
 | HUD icon | 160 ms in, 110 ms out | | opacity |
+| Notification text change | 200 ms in, 120 ms out (fade, and the outgoing text stays in the same cell) | ease | opacity |
 | Timer digit roll | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)`, 150 ms crossfade under reduced motion | transform and opacity |
 | Last-ten-seconds beat | 300 ms | ease-out, scale 1 to 1.06 to 1 | transform |
 | Finished ring ripple | 900 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)`, scale 1 to 2.6 | transform and opacity |
@@ -336,6 +345,8 @@ Three round buttons: skip 60 px, play 68 px, glyphs 36 px and 40 px, 12 px gap, 
 | 9 | An alert measured mid-ripple read 25 px taller than its content (the ring was scaled). | Measure alerts at least 1.8 s after they open. The ripple is a transform, so it must have finished. |
 | 10 | The idle pill had no content, so its middle was blank. | Keep the idle pill minimal and make any content a setting that defaults on (section 10). |
 | 11 | The timer's mode tabs moved up and down (15 to 34 px, 19 px) as each mode's content changed height, because the whole timer page was centred as one block. | Controls that switch modes are docked; only the content below adapts. Give that content the remaining height and centre it there (section 3.2). |
+| 12 | The notification text started at the badge's edge, with no gap between them. | Keep an 8 px gap between a compact pill's badge and its text column, and mirror it on the right so the text stays centred. |
+| 13 | Svelte drops a space at the start of an element, so a title and body joined with `<span> {body}</span> ` ran together ("Lunch at noon?Bring"). | Emit a separator as its own expression, such as `{" "}`, not as a leading space inside a span. |
 
 ## 9. Accessibility and reduced motion
 
@@ -370,6 +381,7 @@ has a row in `src/settings/Settings.svelte`.
 | `confirmLock` | on | First tap arms Lock for 3 s. |
 | `hud` | on | Volume and brightness HUD. |
 | `timerSound` | on | Beep when a countdown ends. |
+| `notifications` (`enabled`, `deniedApps`) | on, no apps denied | Shows other apps' Windows toasts in the notification pill. Settings > Notifications lists the apps and turns each on or off. |
 | `idleClock` | on | Shows HH:MM, dim, in the idle pill. |
 | `focusMinutes`, `shortBreakMinutes`, `longBreakMinutes` | 25, 5, 15 | Pomodoro lengths. |
 
@@ -432,5 +444,8 @@ changes.
 
 - The real Tauri window is not part of the browser harness. Click-through, the window's placement and
   the Settings window's appearance are checked in `tauri dev`.
+- The notification pill takes the cursor like the HUD does, because the window hit-tests every pill
+  by its size. Its own element has `pointer-events: none`, and nothing is wired to it, so a click
+  does nothing. The pill never shows an icon, only the app's initial.
 - Timer digits are measured by line box, not by ink. A font with a tall or short cap height can look
   a pixel off-centre. Adjust `line-height` on the element, not the padding, if that happens.

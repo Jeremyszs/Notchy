@@ -16,6 +16,8 @@
   import { levels } from "./stores/audio";
   import { refresh as refreshControls } from "./stores/controls";
   import { hud } from "./stores/hud";
+  import { notice } from "./stores/notifications";
+  import { initialOf } from "./lib/notifications";
   import { hudFill, hudIcon, hudLabel, type HudIcon } from "./lib/hud";
   import { activityLabel, alertCopy, cycleDots, palette, ringRotations } from "./lib/timer";
   import { lastFinish, timerState, timerView, addTime, dismissTimer } from "./stores/timer";
@@ -42,6 +44,7 @@
     active: { w: 200, h: 30, ear: 10 },
     activity: { w: 220, h: 30, ear: 10 },
     hud: { w: 260, h: 30, ear: 10 },
+    notification: { w: 260, h: 30, ear: 10 },
     alert: { w: 320, h: 64, ear: 10 },
     expanded: { w: 380, h: 192, ear: 10 },
     lyrics: { w: 620, h: 224, ear: 10 },
@@ -53,6 +56,9 @@
   $: hudFraction = hudFill($hud);
   $: hudText = hudLabel($hud);
   $: hudMuted = $hud.kind === "volume" && $hud.muted;
+
+  // The notification pill shows the newest notice from the queue, and its app's initial as the badge.
+  $: noticeBadge = initialOf($notice.app);
 
   // Pages slide this far sideways as they change. Reduced motion keeps only the fade.
   const PAGE_SHIFT = 16;
@@ -430,6 +436,26 @@
           <span class="hud-fill" style="transform: scaleX({hudFraction})"></span>
         </div>
         <span class="hud-value">{hudText}</span>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="shape notification"
+    class:on={$islandState === "notification"}
+    style={shapeStyle("notification", shown)}
+  >
+    <div class="frame" style={frameStyle("notification", shown)}>
+      {@render outline("notification")}
+      <div class="content notice-row">
+        <span class="notice-badge" aria-hidden="true">{noticeBadge}</span>
+        <div class="notice-copy" role="status">
+          {#key $notice.seq}
+            <p class="notice-text" in:fade={{ duration: 200 }} out:fade={{ duration: 120 }}>
+              <span class="notice-title">{$notice.title}</span>{#if $notice.body}{" "}<span class="notice-body">{$notice.body}</span>{/if}
+            </p>
+          {/key}
+        </div>
       </div>
     </div>
   </div>
@@ -890,6 +916,62 @@
     font-variant-numeric: tabular-nums;
     text-align: right;
     color: rgba(255, 255, 255, 0.9);
+  }
+
+  /* The notification pill. Three columns, so the text sits in the middle with the badge on the left
+     and an equal 16 px empty column on the right, which keeps the text centred in the pill. The
+     badge is the notification accent. The text is one line and fades out with an ellipsis. The
+     pill takes no clicks: nothing is wired to it. */
+  .shape.notification.on {
+    pointer-events: none;
+  }
+
+  .notice-row {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr) 16px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .notice-badge {
+    justify-self: start;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(90deg, #0a84ff, #64d2ff);
+    color: #000;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  /* Each notice is laid over the same grid cell, so an outgoing text fades over the new one
+     without moving the pill. */
+  .notice-copy {
+    display: grid;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .notice-text {
+    grid-area: 1 / 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .notice-body {
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.6);
   }
 
   .panel {

@@ -6,6 +6,8 @@
   import { PAGE_LABELS, type Page } from "../stores/pages";
   import type { ControlInfo } from "../stores/controls";
   import { FONT_OPTIONS, fontStack, type FontId } from "../lib/font";
+  import { accessCopy, isAllowed, setAllowed } from "../lib/notifications";
+  import { notificationsStatus } from "../stores/notifications";
   import { moveRow, ordered, type Row } from "./rows";
   import ReorderList from "./ReorderList.svelte";
   import Switch from "./Switch.svelte";
@@ -38,6 +40,8 @@
   let focusMinutes = DEFAULT_CONFIG.focusMinutes;
   let shortBreakMinutes = DEFAULT_CONFIG.shortBreakMinutes;
   let longBreakMinutes = DEFAULT_CONFIG.longBreakMinutes;
+  let notifyOn = DEFAULT_CONFIG.notifications.enabled;
+  let deniedApps: string[] = [];
   let confirmingReset = false;
   let status = "";
   let version = "";
@@ -121,7 +125,14 @@
       focusMinutes,
       shortBreakMinutes,
       longBreakMinutes,
+      notifications: { enabled: notifyOn, deniedApps },
     };
+  }
+
+  // Turning an app on or off changes only the denied list. The save is the same as any other change.
+  function toggleApp(id: string, allowed: boolean): void {
+    deniedApps = setAllowed(deniedApps, id, allowed);
+    scheduleSave();
   }
 
   // A typed minute count, kept inside its range. Text that is not a number keeps the old value.
@@ -190,6 +201,8 @@
     focusMinutes = settings.focusMinutes;
     shortBreakMinutes = settings.shortBreakMinutes;
     longBreakMinutes = settings.longBreakMinutes;
+    notifyOn = settings.notifications.enabled;
+    deniedApps = settings.notifications.deniedApps;
   }
 
   function resetDefaults(): void {
@@ -352,6 +365,46 @@
           />
         </li>
       </ul>
+    </section>
+
+    <section aria-labelledby="notifications-title">
+      <h2 id="notifications-title">Notifications</h2>
+      <ul class="group">
+        <li class="row">
+          <span class="text"><span class="label">Show notifications from other apps</span></span>
+          <Switch
+            checked={notifyOn}
+            label="Show notifications from other apps"
+            onchange={(on) => {
+              notifyOn = on;
+              scheduleSave();
+            }}
+          />
+        </li>
+      </ul>
+      {#if notifyOn}
+        <p class="note" role="status">{accessCopy($notificationsStatus.access)}</p>
+      {/if}
+      <h3 class="sub">Apps</h3>
+      {#if $notificationsStatus.apps.length === 0}
+        <ul class="group">
+          <li class="empty">Apps appear here after they send a notification.</li>
+        </ul>
+      {:else}
+        <ul class="group">
+          {#each $notificationsStatus.apps as app (app.id)}
+            <li class="row">
+              <span class="text"><span class="label">{app.name}</span></span>
+              <Switch
+                checked={isAllowed(app.id, deniedApps)}
+                label="Show notifications from {app.name}"
+                onchange={(on) => toggleApp(app.id, on)}
+              />
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <p class="note">Notification text is read on this PC and never saved.</p>
     </section>
 
     <section aria-labelledby="timer-title">
@@ -628,6 +681,29 @@
     font-size: 15px;
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+
+  .sub {
+    margin: 16px 0 6px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .note {
+    margin: 8px 16px 0;
+    font-size: 13px;
+    line-height: 18px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .empty {
+    box-sizing: border-box;
+    min-height: 56px;
+    padding: 16px;
+    font-size: 15px;
+    line-height: 24px;
+    color: rgba(255, 255, 255, 0.55);
   }
 
   .reset {

@@ -21,6 +21,7 @@ use windows::core::w;
 
 use crate::modules::controls::{self, Kind};
 use crate::modules::lyrics;
+use crate::modules::notifications;
 
 const FILE_NAME: &str = "config.json";
 const UPDATE_EVENT: &str = "config://update";
@@ -79,6 +80,43 @@ pub struct Config {
     pub short_break_minutes: u32,
     /// Pomodoro long break length, in minutes. Held to LONG_BREAK_MINUTES.
     pub long_break_minutes: u32,
+    /// Other apps' toast notifications, shown in the island.
+    pub notifications: Notifications,
+}
+
+/// The notification feature's settings. Mirrors `notifications` in src/stores/config.ts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Notifications {
+    /// Show other apps' notifications. On by default, and only read while on.
+    pub enabled: bool,
+    /// App ids (AppUserModelIds) whose notifications are ignored. Every other app is shown.
+    pub denied_apps: Vec<String>,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            denied_apps: Vec::new(),
+        }
+    }
+}
+
+impl Notifications {
+    /// Trims app ids, drops empty ones and repeats. Pure, like `Config::sanitize`.
+    fn sanitize(self) -> Self {
+        let trimmed = self
+            .denied_apps
+            .into_iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect();
+        Self {
+            denied_apps: keep_unique(trimmed, |_| true),
+            ..self
+        }
+    }
 }
 
 impl Default for Config {
@@ -96,6 +134,7 @@ impl Default for Config {
             focus_minutes: FOCUS_MINUTES.0,
             short_break_minutes: SHORT_BREAK_MINUTES.0,
             long_break_minutes: LONG_BREAK_MINUTES.0,
+            notifications: Notifications::default(),
         }
     }
 }
@@ -138,6 +177,7 @@ impl Config {
             focus_minutes: clamp_minutes(FOCUS_MINUTES, self.focus_minutes),
             short_break_minutes: clamp_minutes(SHORT_BREAK_MINUTES, self.short_break_minutes),
             long_break_minutes: clamp_minutes(LONG_BREAK_MINUTES, self.long_break_minutes),
+            notifications: self.notifications.sanitize(),
             ..self
         }
     }
@@ -176,6 +216,19 @@ pub fn lyrics_enabled(app: &AppHandle) -> bool {
 pub fn hud_enabled(app: &AppHandle) -> bool {
     app.try_state::<SharedConfig>()
         .is_none_or(|config| lock(&config).hud)
+}
+
+/// Whether other apps' notifications are shown. Defaults to on when no config is managed yet.
+pub fn notifications_enabled(app: &AppHandle) -> bool {
+    app.try_state::<SharedConfig>()
+        .is_none_or(|config| lock(&config).notifications.enabled)
+}
+
+/// The app ids whose notifications are ignored. Empty when no config is managed yet.
+pub fn denied_apps(app: &AppHandle) -> Vec<String> {
+    app.try_state::<SharedConfig>()
+        .map(|config| lock(&config).notifications.denied_apps.clone())
+        .unwrap_or_default()
 }
 
 /// The settings file inside the app config directory.
@@ -342,6 +395,9 @@ pub async fn config_set(app: AppHandle, config: Config) -> Result<Config, String
     if previous.lyrics != next.lyrics {
         lyrics::reapply(&app);
     }
+    if previous.notifications != next.notifications {
+        notifications::reapply(&app);
+    }
     let _ = app.emit(UPDATE_EVENT, &next);
     autostart.map(|()| next)
 }
@@ -457,6 +513,35 @@ mod tests {
         assert!(json.contains("\"focusMinutes\":25"));
         assert!(json.contains("\"shortBreakMinutes\":5"));
         assert!(json.contains("\"longBreakMinutes\":15"));
+        assert!(json.contains("\"notifications\":{\"enabled\":true,\"deniedApps\":[]}"));
+    }
+
+    /// Files written before notifications existed have no such key. They get it on, with nothing
+    /// denied, and the rest of their settings are kept.
+    #[test]
+    fn file_without_notification_settings_turns_them_on() {
+        let config: Config = serde_json::from_str(r#"{"lyrics": false}"#).unwrap();
+        assert_eq!(config.sanitize().notifications, Notifications::default());
+
+        let partial: Config =
+            serde_json::from_str(r#"{"notifications": {"deniedApps": ["Mail"]}}"#).unwrap();
+        let partial = partial.sanitize();
+        assert!(partial.notifications.enabled);
+        assert_eq!(partial.notifications.denied_apps, ids(&["Mail"]));
+    }
+
+    #[test]
+    fn denied_apps_are_trimmed_and_repeats_dropped() {
+        let config = Config {
+            notifications: Notifications {
+                enabled: false,
+                denied_apps: ids(&["  Mail ", "", "Mail", "Chat"]),
+            },
+            ..Config::default()
+        }
+        .sanitize();
+        assert!(!config.notifications.enabled);
+        assert_eq!(config.notifications.denied_apps, ids(&["Mail", "Chat"]));
     }
 
     /// PowerShell writes a byte order mark. Before the fix, such a file parsed as nothing and every

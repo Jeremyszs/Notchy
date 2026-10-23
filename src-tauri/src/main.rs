@@ -53,6 +53,7 @@ fn main() {
             modules::controls::network::wifi_connect,
             modules::controls::network::bluetooth_devices,
             modules::controls::network::open_settings,
+            modules::notifications::notifications_snapshot,
             modules::timer::timer_snapshot,
             modules::timer::timer_select,
             modules::timer::timer_start,

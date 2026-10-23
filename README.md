@@ -8,6 +8,7 @@ A Dynamic Island-style notch overlay for Windows. Tauri 2 (Rust) + Svelte 5 + Ty
 - **Active** (media playing): the pill widens, showing album art and equalizer bars. The bars follow the system's audio output while this pill is on screen (see Audio levels below), and animate on a timer otherwise.
 - **Expanded** (hover): two pages, switched by the dots, a wheel turn, or a horizontal swipe. The **Media** page shows album art, title, artist, the current synced lyric line (or "Playing from <app>" when there are no lyrics), and previous / play-pause / next controls. The **Controls** page has volume and brightness sliders and toggle tiles (Wi-Fi, Bluetooth, airplane, mute, keep awake, lock), driven by the controls backend. Opening the panel picks the page: the last one if it was left within 8 s, otherwise Media when something is playing, else Controls. The page list lives in `src/stores/pages.ts`. On the Media page, when the track has synced lyrics, hovering widens the panel into a lyrics layout: circular album art, large transport controls centred under it, and three lyric lines (the current one up to two lines) over a tint taken from the album art.
 - **HUD** (the system volume, mute or panel brightness changed): the pill widens into a slim bar for about 1.6 s, then gives way again. Each new change restarts that time. Hover still wins, and a fullscreen app still hides the notch (see Volume and brightness HUD below).
+- **Notification** (another app shows a Windows toast): a slim pill for 5 s with the app's initial, the title and the start of the body. Newer ones wait their turn. Off in Settings, or per app. It needs Windows' notification access (see Notifications below).
 - **Activity** (a timer is running, paused, or finished and waiting to be dismissed): the compact pill shows a ring on the left and the time on the right, with the word in the middle (Timer, Stopwatch, Focus, Break, Long break, Paused or Done). A pomodoro also shows one dot per focus session. It takes the place of the media title and bars. Hover expands it as usual.
 - **Alert** (a countdown just reached zero): a card for about 4 s, with the copy, **+1 min** and **Dismiss**. It holds even under the pointer, so its buttons stay where they are.
 - **Tucked** (a window sits under the notch): shrinks to a thin sliver. Hover it for 250 ms to open it. A covering window also tucks a live activity.
@@ -35,7 +36,7 @@ Other commands: `npm run tauri build` (release bundle), `npm run check` (Svelte/
 | --- | --- | --- |
 | Overlay shell | `src-tauri/src/window.rs` | Frameless transparent window, `WS_EX_TOOLWINDOW`/`WS_EX_NOACTIVATE` (guarded by a window subclass so Tauri can't reset them), top-center placement, cursor-poll click-through |
 | State machine | `src-tauri/src/state.rs` | `Idle` / `Active` / `Expanded` / `Tucked` / `Hidden`, emitted as `island://state` |
-| Modules | `src-tauri/src/modules/` | Isolated feature modules; they emit events and never touch the window. `media.rs` reports playback, `lyrics.rs` fetches synced lyrics for the current track, `context.rs` reports screen presence |
+| Modules | `src-tauri/src/modules/` | Isolated feature modules; they emit events and never touch the window. `media.rs` reports playback, `lyrics.rs` fetches synced lyrics for the current track, `context.rs` reports screen presence, `notifications.rs` shows other apps' toasts |
 | Frontend | `src/` | Renders whatever state it receives; animates only `transform` and `opacity` |
 
 **Click-through:** the window is bigger than the pill and ignores the mouse by default. A thread polls `GetCursorPos` at ~60 Hz, and only on entering or leaving the pill bounds does it toggle click-through and emit `island://hover`.
@@ -46,7 +47,7 @@ Other commands: `npm run tauri build` (release bundle), `npm run check` (Svelte/
 
 **Audio levels:** while the compact Active pill is on screen and media is playing, the frontend calls `audio_set_active(true)`, and the backend streams four bar levels on `audio://levels` at about 30 Hz. Every other state turns analysis off, after a 150 ms debounce. If the command is missing, capture fails, or no frame arrives for 400 ms, the bars fall back to the CSS animation. Reduced motion keeps the bars static and never starts analysis.
 
-**Privacy:** lyrics lookups send the cleaned track title and artist to `lrclib.net`, plus the album and duration when the app reports them. A track is sent only the first time it plays, while it stays in the cache. Nothing else leaves the machine. Turn lyrics off in Settings and nothing is sent.
+**Privacy:** lyrics lookups send the cleaned track title and artist to `lrclib.net`, plus the album and duration when the app reports them. A track is sent only the first time it plays, while it stays in the cache. Nothing else leaves the machine. Turn lyrics off in Settings and nothing is sent. Notification text is read and shown on this PC only, and never leaves it.
 
 **Audio-reactive bars:** `modules/audio.rs` (with `audio/analysis.rs`) drives the equalizer bars in the compact pill. `audio_set_active` starts one capture thread only while the bars are shown. It records the default output through WASAPI loopback (what the speakers play, not the microphone), mixes it to mono, and runs a 1024-sample Hann-windowed FFT about 30 times a second. Four log-spaced bands (40 to 250 Hz, 250 Hz to 1 kHz, 1 to 4 kHz, 4 to 12 kHz) map through dB to levels from 0 to 1, which are smoothed and sent as `audio://levels` only when they change. Privacy: audio is analysed locally, only four numbers per frame leave the capture thread, and nothing is stored or sent anywhere. With no output device, or no sound, the levels are zero, and a failed capture emits nothing.
 
@@ -74,7 +75,21 @@ The **Timer** page (page id `timer`) runs three clocks: a countdown with quick p
 
 The fixed rules, which the tests pin down: a finished timer stays in the pill until dismissed, and "+1 min" starts it again with that minute left. A late tick does not drift a pomodoro, because each phase starts at the moment the previous one ended. Nothing is persisted except the settings below.
 
-Precedence (highest first): fullscreen hides it; an alert shows over hover; hover expands; the HUD; a covering window tucks it; the activity; media. When a timer runs and media plays, the timer owns the compact pill.
+Precedence (highest first): fullscreen hides it; an alert shows over hover; hover expands; the HUD; a notification; a covering window tucks it; the activity; media. When a timer runs and media plays, the timer owns the compact pill.
+
+## Notifications
+
+`modules/notifications.rs` shows other apps' Windows toasts in the notch. A poller reads the user notification listener (`UserNotificationListener`) once every 1.5 s, and only while the feature is on. The listener's change event fails for unpackaged apps, so nothing is subscribed. The WinRT calls live in `modules/notifications/listener.rs`. A `Tracker` decides which toasts are new, and a `Queue` shows them one at a time for 5 s each. Both are pure, and the tests pin their rules down.
+
+- **The first poll is silent.** When the feature turns on, or the app starts, the toasts already on screen are recorded and not shown. Turning it on never floods the notch.
+- **One at a time.** Toasts show oldest first. A toast that arrives while one is up waits its turn. At most five wait, and beyond that the oldest waiting one is dropped.
+- **Precedence.** Fullscreen hides it. A timer alert and hover both outrank it, and so does the HUD. It sits under the HUD so that a volume change is never hidden by a message. Like the HUD, it shows over a covered notch.
+- **Text.** The first line is the title and the rest, joined, is the body. Whitespace is collapsed and repeated lines dropped. The title is cut at 80 characters and the body at 160, and the pill cuts to one line with an ellipsis.
+- **Access.** Windows must allow it: Settings > Privacy & security > Notifications > "Let apps access your notifications". Notchy asks Windows for access once each time the feature turns on, when Windows has not decided yet. Settings shows Allowed, Denied or Unspecified. It never opens Windows settings for you.
+
+Settings > Notifications holds the switch, the access line and a switch for each app seen so far. An app that is turned off is listed in `notifications.deniedApps` in `config.json`, by its AppUserModelId. The apps seen so far are saved to `notification-apps.json` beside it, with only ids and names, so the list survives a restart. Notification text is never saved or logged.
+
+Limits: a toast appears up to about 1.5 s after it arrives. A toast that is cleared before the next poll is missed. The pill has no click action and no icon, only the app's initial. Focus assist (Do not disturb) is not checked, so a toast that Windows holds back can still show if it is still in the notification list. Only toasts that Windows still lists can be read.
 
 The ring is two half discs, each turning inside its half of the ring, so only `transform` changes, about once a second, and the compositor runs the sweep. The digits roll like an odometer: each changed digit leaves upward while its replacement rises from below over 220 ms (`cubic-bezier(.2,.8,.2,1)`), in fixed tabular columns, and reduced motion keeps a 150 ms crossfade. The last ten seconds beat once a second. The finished ring ripples outward and the card springs open, using the island's own shape easing.
 
@@ -90,9 +105,9 @@ Ids: `volume`, `mute`, `mic`, `brightness`, `wifi`, `bluetooth`, `airplane`, `lo
 
 The tray icon opens **Settings** on left-click (or from its menu). Settings is a second window, built on first use and hidden, not closed, when you close it. The tray menu also has **Quit Notchy**, the only way to exit the app.
 
-Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, show the time when idle, the volume and brightness HUD, confirm before locking, launch at login, and the timer's sound and pomodoro lengths. Every change saves at once and applies live.
+Settings holds the notch pages and their order, the quick controls and their order (at most seven tiles, since sliders sit above the row), show lyrics, show the time when idle, the volume and brightness HUD, confirm before locking, launch at login, the timer's sound and pomodoro lengths, and the notifications switch with its app list. Every change saves at once and applies live.
 
-The file is `config.json` in the app config directory (`%APPDATA%\com.notchy.app\config.json`). `config.rs` owns it: a missing or corrupt file gives the defaults, and saves are written through a temp file and renamed. A leading UTF-8 byte order mark (which Windows PowerShell writes) is skipped on load, so a hand-edited file keeps its settings. Launch at login is the `Notchy` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+The file is `config.json` in the app config directory (`%APPDATA%\com.notchy.app\config.json`). The notification app list is `notification-apps.json` beside it. `config.rs` owns it: a missing or corrupt file gives the defaults, and saves are written through a temp file and renamed. A leading UTF-8 byte order mark (which Windows PowerShell writes) is skipped on load, so a hand-edited file keeps its settings. Launch at login is the `Notchy` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 
 ## Fonts
 
@@ -117,3 +132,4 @@ Apple's SF is **not bundled**. Its licence limits use to Apple platforms, so Not
 - Only the primary monitor is supported.
 - The volume and brightness HUD follows the default output and the built-in panel. External monitors show no brightness HUD, and the native Windows OSD still appears alongside it.
 - One timer runs at a time, and its state is not kept across restarts. The stopwatch keeps 20 laps; later laps are ignored.
+- Notifications need Windows' "Let apps access your notifications" switch on. They are read by polling every 1.5 s, so a toast can show up to about 1.5 s late. There is no click action and no icon, and Focus assist is not checked. The notification pill also takes the cursor like the HUD does, so the notch does not click through there.

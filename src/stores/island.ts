@@ -10,6 +10,7 @@ export type IslandState =
   | "lyrics"
   | "tucked"
   | "hud"
+  | "notification"
   | "alert"
   | "hidden";
 
