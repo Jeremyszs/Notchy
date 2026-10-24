@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Emitter, Manager};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINTL, RECT, WPARAM};
@@ -22,7 +23,7 @@ use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Ref, implement, w};
 
-use crate::{modules::shelf, state};
+use crate::{modules::shelf, modules::shelf_drag, state};
 
 /// The catcher's place and whether it may show. Locked only for field access, never across a
 /// window call: the window calls can wait on the main thread, which may need this lock.
@@ -91,8 +92,10 @@ pub fn update(zone: Option<RECT>, held: bool) {
         if !held {
             state.suppressed = false;
         }
+        // A drag out of the shelf is never a drop onto it, so the catcher stays down for it.
+        let own = shelf_drag::OWN_DRAG.load(Ordering::SeqCst);
         let want = zone
-            .filter(|_| held && !state.suppressed)
+            .filter(|_| held && !state.suppressed && !own)
             .map(|r| (r.left, r.top, r.right - r.left, r.bottom - r.top));
         let action = match (want, state.shown) {
             (Some(rect), Some(shown)) if rect == shown => None,
@@ -192,9 +195,14 @@ impl IDropTarget_Impl for DropTarget_Impl {
         _pt: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        let files = !dropped_paths(data).is_empty();
+        // Our own drag out carries files too, so it is refused before the files are read.
+        let own = shelf_drag::OWN_DRAG.load(Ordering::SeqCst);
+        let files = !own && !dropped_paths(data).is_empty();
         self.accepting.set(files);
-        if files {
+        if own {
+            suppress();
+            hide();
+        } else if files {
             set_drag(&self.app, true);
         } else {
             // Not files: give the zone back to whatever is underneath until the button is up.
@@ -232,7 +240,7 @@ impl IDropTarget_Impl for DropTarget_Impl {
         self.accepting.set(false);
         set_drag(&self.app, false);
         hide();
-        let accepted = !paths.is_empty();
+        let accepted = !shelf_drag::OWN_DRAG.load(Ordering::SeqCst) && !paths.is_empty();
         if accepted {
             let added = shelf::add_paths(&self.app, paths);
             let _ = self.app.emit("shelf://added", added);

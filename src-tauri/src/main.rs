@@ -87,6 +87,7 @@ fn main() {
             modules::shelf::shelf_open,
             modules::shelf::shelf_reveal,
             modules::shelf::shelf_drag_active,
+            modules::shelf::shelf_drag_out,
             config::config_get,
             config::config_set,
         ])

@@ -7,7 +7,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::DataExchange::*;
@@ -19,16 +19,34 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
+use super::shelf_drag;
 use super::{Module, ModuleContext};
 use crate::{config, state};
 
 const CAP: usize = 20;
 const UNICODE_TEXT: u32 = 13;
 
+/// The two modes of the page. The wire names match `ShelfItem.kind` in the frontend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Text,
+    File,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 enum Content {
     Text(String),
     File(PathBuf),
+}
+
+impl Content {
+    fn kind(&self) -> Kind {
+        match self {
+            Self::Text(_) => Kind::Text,
+            Self::File(_) => Kind::File,
+        }
+    }
 }
 
 struct Item {
@@ -127,8 +145,10 @@ impl Shelf {
         self.sort();
     }
 
-    fn clear(&mut self) {
-        self.items.retain(|item| item.pinned);
+    /// Removes the unpinned items of one mode. The other mode and every pinned item stay.
+    fn clear(&mut self, kind: Kind) {
+        self.items
+            .retain(|item| item.pinned || item.content.kind() != kind);
     }
     fn disable_clipboard(&mut self) {
         self.items
@@ -277,9 +297,9 @@ pub fn shelf_remove(app: AppHandle, handle: State<'_, ShelfHandle>, id: u64) {
     publish(&app, &shelf);
 }
 #[tauri::command]
-pub fn shelf_clear(app: AppHandle, handle: State<'_, ShelfHandle>) {
+pub fn shelf_clear(app: AppHandle, handle: State<'_, ShelfHandle>, kind: Kind) {
     let mut shelf = lock(&handle.shelf);
-    shelf.clear();
+    shelf.clear(kind);
     publish(&app, &shelf);
 }
 /// Adds dropped paths, newest first, and returns how many were new or moved to the front. Only
@@ -324,6 +344,42 @@ pub fn shelf_drag_active(app: AppHandle, active: bool) {
         machine.set_file_drag(active);
     });
     let _ = app.emit("shelf://drag", active);
+}
+
+/// Drags one item out to another app. The item is copied, so it stays on the shelf. The drag runs
+/// on the main thread, which owns OLE, and this returns when the drag ends.
+#[tauri::command]
+pub async fn shelf_drag_out(app: AppHandle, id: u64) -> Result<(), String> {
+    let payload = {
+        let handle = app.state::<ShelfHandle>();
+        let shelf = lock(&handle.shelf);
+        match shelf
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.content.clone())
+        {
+            Some(Content::Text(text)) => shelf_drag::Payload::Text(text),
+            Some(Content::File(path)) if path.exists() => shelf_drag::Payload::File(path),
+            _ => return Err("Item cannot be dragged".into()),
+        }
+    };
+    let island = app.state::<state::SharedIsland>().inner().clone();
+    state::commit(&app, &island, |machine| machine.set_drag_out(true));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let started = app.run_on_main_thread(move || {
+        let _ = sender.send(shelf_drag::run(payload));
+    });
+    let outcome = match started {
+        Ok(()) => tauri::async_runtime::spawn_blocking(move || receiver.recv())
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_else(|| Err("Drag did not start".into())),
+        Err(_) => Err("Drag did not start".into()),
+    };
+    state::commit(&app, &island, |machine| machine.set_drag_out(false));
+    outcome
 }
 
 fn owned_path(handle: &ShelfHandle, id: u64) -> Result<PathBuf, String> {
@@ -661,10 +717,38 @@ mod tests {
             shelf.items.iter().map(|item| item.id).collect::<Vec<_>>(),
             [1, 2, 3]
         );
-        shelf.clear();
+        shelf.clear(Kind::Text);
         assert_eq!(shelf.items.len(), 2);
         shelf.pin(1, false);
         assert_eq!(shelf.items[0].id, 2);
+    }
+    #[test]
+    fn clear_removes_only_unpinned_items_of_one_kind() {
+        let mut shelf = Shelf::default();
+        shelf.text("t1", 1);
+        shelf.text("t2", 2);
+        file(&mut shelf, "f1", 3);
+        file(&mut shelf, "f2", 4);
+        shelf.pin(1, true);
+        shelf.pin(4, true);
+        shelf.clear(Kind::File);
+        let kinds: Vec<(u64, Kind)> = shelf
+            .items
+            .iter()
+            .map(|item| (item.id, item.content.kind()))
+            .collect();
+        assert_eq!(kinds, [(4, Kind::File), (1, Kind::Text), (2, Kind::Text)]);
+        shelf.clear(Kind::Text);
+        assert_eq!(shelf.items.iter().map(|item| item.id).collect::<Vec<_>>(), [4, 1]);
+        shelf.clear(Kind::File);
+        assert_eq!(shelf.items.iter().map(|item| item.id).collect::<Vec<_>>(), [4, 1]);
+    }
+    #[test]
+    fn kind_parses_the_wire_names_the_page_sends() {
+        let text: Kind = serde_json::from_str("\"text\"").unwrap();
+        let file: Kind = serde_json::from_str("\"file\"").unwrap();
+        assert!(text == Kind::Text && file == Kind::File);
+        assert!(serde_json::from_str::<Kind>("\"Files\"").is_err());
     }
     #[test]
     fn text_limits_and_preview_keep_unicode_and_line_breaks() {

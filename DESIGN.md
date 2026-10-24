@@ -114,7 +114,7 @@ Measured in the shipped build (gap above / gap below the content block, px):
 | Timer, pomodoro (focus, break, paused, done) | 9 | 9 | 98 |
 | Wi-Fi and Bluetooth sub-views | header on top edge, footer on bottom edge | | 146 |
 | Calendar (month grid and notes) | 3 | 3 | 140 |
-| Shelf (20 px header, 8 px gap, 104 px card strip) | 7 | 7 | 132 |
+| Shelf (24 px mode switch, 8 px, 84 px card row, 8 px, 20 px Clear row) | 1 | 1 | 144 |
 
 The Media content height is 72 + 8 + 16 + 8 + 40 = 144 px, leaving 1 px above and below in the 146 px page box.
 
@@ -262,9 +262,9 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | 11 / 14 | 400 | Media progress times, elapsed and length (tabular, 60% white) |
 | 12 / 24 | 500 | Calendar page snooze title (90% white), one line with an ellipsis |
 | 11 / 20 | 600 | Calendar page snooze buttons, "5 min" and "10 min" (accent text) |
-| 12 / 16 | 600 | Shelf header label, and the empty card's title (90% white) |
-| 11 / 14 | 600 | Shelf count pill, Clear (60% white, Clear at 35% when disabled), a file name (90% white, 2-line clamp) |
-| 11 / 14 | 400 | Shelf card text (90% white, 3-line clamp), card age and extension (60% white), empty card's second line (60% white) |
+| 12 / 16 | 600 | Shelf mode labels (Files, Text) and the empty card's title (90% white). The selected label is dark, 10 16 24 at 90%, on the light-blue pill (about 10.8:1, computed; white would be about 1.7:1) |
+| 11 / 14 | 600 | Shelf mode counts, Clear (60% white, Clear at 35% when disabled), a file name (90% white, 2-line clamp) |
+| 11 / 14 | 400 | Shelf card text (90% white, 2-line clamp), card age and extension (60% white), empty card's second line (60% white) |
 
 - **Tabular numbers.** Every number that changes while shown uses `font-variant-numeric: tabular-nums`
   (digits, activity clock, HUD value, idle clock, stepper value). `RollingClock` lays each digit in a
@@ -313,7 +313,7 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Island calendar page, snooze buttons | `#FF6A3D` | | link text (7.4:1 on `#000`), with a 14% accent fill on hover |
 | Media progress bar | `#FFFFFF` | | the fill, on a track at 16% white. No accent: the artwork is the colour |
 | Settings form, chips on | `#FFFFFF` | | a toggle that is on: white with a black label, as the switches are |
-| Shelf accent (chip, hairline, count pill, drop outline and sheen, Copied flash, pin mark) | `#8CCBFF` | `#6CB8FF`, `#5AAEF7` | One soft sky blue, in three tints for the moving sheen. No other hue on the Shelf. The pin is a stroke in the accent. Never behind text |
+| Shelf accent (mode pill, drop outline and sheen, Copied flash, pin mark) | `#8CCBFF` | `#6CB8FF`, `#5AAEF7` | One soft sky blue, in three tints for the moving sheen. No other hue on the Shelf. The pin is a stroke in the accent. The mode pill is the only solid accent fill, and it carries dark text, never white |
 | Shelf card tint (text and file cards alike) | `#6CB8FF` at 10% | | over the 8% white card, so kind is told by the glyph only. Text stays 90% white (about 12:1 on the tinted card, computed) |
 
 - **Accent use.** An accent fills a ring, a strong pill, a filled pomodoro session, or the glow. It is
@@ -359,10 +359,15 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Settings month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform and opacity. Reduced motion: a 150 ms fade, no slide |
 | Island calendar month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | cubic-out (Svelte `fly`) | transform and opacity. Reduced motion: a 150 ms fade, no slide |
 | Media progress fill | 250 ms, linear, one step per tick (the clock ticks 4 times a second while it runs) | linear | transform scaleX. A drag has no transition, and reduced motion jumps |
-| Shelf sheen (header hairline; empty card 14 s) | 12 s loop | linear, infinite | transform translateX over a 300% gradient layer, one gradient cycle per loop |
+| Shelf sheen (empty card, 14 s) | 12 s loop | linear, infinite | transform translateX over a 300% gradient layer, one gradient cycle per loop |
 | Shelf drop highlight sheen | 3.5 s loop | linear, infinite | transform, as above; the outline's opacity pulses 0.75 to 1 over 3.5 s |
+| Shelf mode pill slides | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)` | transform translateX (one pill width). Reduced motion: it jumps |
+| Shelf mode rows change | 160 ms in, 120 ms out | ease | opacity only |
 | Shelf card arrives | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)` | opacity and transform translateY 6 px to 0 |
-| Shelf card leaves, drop highlight in and out, Copied flash, action pill | 150 ms | ease | opacity only |
+| Shelf card removed | 180 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)` | opacity 1 to 0, transform translateY 0 to -6 px and scale 1 to 0.92 (Web Animations, filled). The cards after it slide with `animate:flip` over 180 ms, same curve |
+| Shelf clear | 35 ms stagger, last card starts by 240 ms, 180 ms each | as above | as the removed card. The whole clear ends by 420 ms, then the empty state fades in over 180 ms |
+| Shelf card dims while dragged out | 150 ms | ease | opacity to 0.45 |
+| Shelf drop highlight in and out, Copied flash, action pill, footer | 150 ms | ease | opacity only |
 | Shelf card hover lift | instant | | transform translateY -1 px (none under reduced motion) |
 
 Rules:
@@ -544,51 +549,41 @@ Measured in the harness: 0 notes (2 October), 1 note (6 October), 4 notes (23 Oc
 
 ### Shelf page
 
-`ShelfPage.svelte` fills the 348 x 146 page box with a centred block: a 20 px header, an 8 px gap and a
-104 px strip. The strip holds 96 x 104 cards with 8 px gaps. The block is 132 px, so 7 px sits above and
-below it. Measured in the browser harness (`getBoundingClientRect`, page top at y 24): the header starts
-7 px below the page top, the strip ends 7 px above the bottom, and the fourth card starts at x 312, so
-the next card peeks 36 px at the right edge. No scrollbar is visible. The strip stays the scroller
-(`.shelf-strip`), which `swipeStart` in `Island.svelte` excludes.
+`ShelfPage.svelte` fills the 348 x 146 page box with one centred block, 144 px tall: a 24 px mode switch, an 8 px gap, an 84 px card row, an 8 px gap and a 20 px Clear row. That leaves 1 px above and below. Measured in the browser harness with `offsetTop` (switch top 1, card row top 33, Clear row top 125, 1 px under it). The page is the Shelf in the expanded panel, and the cards are 96 x 84, so the next card peeks 36 px at the right edge (fourth card at x 312).
 
-**Header**, left to right: a 20 px chip in the accent blue with a tray glyph, the label "Shelf"
-(12 / 16, 600), the count pill (a 16 px pill at 12% white, 11 px, 60%), and the Clear button. Clear is a
-ghost button at 60% white. It is disabled at 35% opacity when nothing unpinned is left. A 1 px hairline
-at 45% in the accent blue runs under the header, in the 8 px gap. While a file drag is over the notch the
-label reads "Drop to shelf". After a drop it reads "N added" for 1.2 s.
+**Modes.** The switch is a 184 px track at 8% white with a light-blue pill (`#8CCBFF` to `#6CB8FF`, inset 2 px). The pill slides between the two labels by transform over 220 ms on the island's curve. The labels are "Files" and "Text" (12 / 16, 600), each with its count (11 / 14, 600). The selected label is dark (10 16 24 at 90%) on the pill, because white on `#8CCBFF` is about 1.7:1 and that dark is about 10.8:1 (computed). The switch is `role="tablist"` with `role="tab"` buttons, `aria-selected`, and a roving tabindex. Left and Right switch the mode and move focus. A 2 px 70% white focus ring shows. Each mode shows only its own items in its own row, and the rows crossfade over 160 ms. The mode is kept in memory (`shelfMode`, `stores/shelf.ts`) while the app runs. Until the first pick it is Files, or Text when clipboard history is on and file drops are off. A file drag onto the notch always selects Files.
 
-**Cards.** Each has a 12 px radius. Text and file cards share one light-blue tint (10%) over the 8% white,
-with a 1 px inner highlight, and kind is shown by the glyph alone. The top row holds a kind glyph at the top left (lines for text, a
-document for a file) and, when pinned, an SVG pin stroked in the accent blue at the top right. The
-body is a 3-line text preview, or a 2-line file name, and it starts below the top row, so it never runs
-under the pin. The footer holds the age (now, 2m, 1h, 3d) at 60% white and, for a file, the extension.
-A missing file is at 45% opacity and shows "Missing" in place of the age. Pinned items come first, then
-the newest.
+**Empty states.** A mode with nothing to show gets its own dashed 84 px card with a tray glyph. Files: "Drop files here", with "Files stay where they are". When Accept dropped files is off, the second line is "Accept dropped files is off, turn it on in Settings". Text: "Copy text to keep it here", with "Copied text stays in memory". When Clipboard history is off, the second line is "Clipboard history is off, turn it on in Settings". A mode whose switch is off shows its empty state even if its items are still in memory.
 
-**Hover and focus.** A card lifts 1 px. The footer fades, and a dark glass pill appears at the bottom
-centre with Pin or Unpin, Show in Explorer (files only) and Remove. Each is a real button with a label
-and a 2 px 70% white focus ring. The pill is a separate element, never nested in the card's button.
+**Status.** "Drop to shelf" while a file drag is over the notch, and "N added" for 1.2 s after a drop. The status fades in over the switch, and it replaces the switch's labels while it shows. The layout does not move.
 
-**Empty state.** The strip area becomes a dashed 1.5 px card (28% white, 14 px radius) with the accent
-sheen behind it. It holds a tray glyph, "Drop files or copy text" (12 / 16, 600) and a 11 / 14 second
-line at 60% white. The second line is "Clipboard history is off, turn it on in Settings" when the
-clipboard is off and files are on. Otherwise it is "Copied text stays in memory".
+**Clear.** A ghost pill at the bottom centre: 60% white, 11 / 14, 600, 20 px tall. It is disabled at 35% when the current mode has nothing unpinned. It removes the unpinned items of the current mode only (`shelf_clear` with `kind`: "text" or "file"). Pinned items and the other mode stay.
 
-**Drop highlight.** While `shelfDrag` is set, an overlay covers the strip: a 1.5 px dashed 70% white
-outline in the accent blue (70%), the sheen at 30% over 3.5 s, and an opacity pulse from 0.75 to 1. At that strength the card text stays readable. It fades in and out over
-150 ms and takes no pointer events.
+**Cards.** Each has a 12 px radius on the 10% accent tint over the 8% white, and kind is shown by the glyph alone. The kind glyph or pin sits 8 px from the top. A 2-line text preview or file name starts 24 px down. The footer, 8 px from the bottom, holds the age (now, 2m, 1h, 3d) and, for a file, the extension. A missing file is at 45% opacity and shows "Missing" in place of the age. Pinned items come first, then the newest.
 
-**Copied flash and removal.** "Copied" overlays a card for 900 ms, and fades over 150 ms. A removed card
-fades out over 150 ms. A new card rises 6 px and fades in over 220 ms on the island's curve.
+**Hover and focus.** A card lifts 1 px. The footer fades, and a dark glass pill appears at the bottom centre with Pin or Unpin, Show in Explorer (files only) and Remove. Each is a real button with a label and a focus ring.
 
-**Scroll rule:** every wheel over the strip maps the dominant axis to scrollLeft and calls both
-preventDefault and stopPropagation, even at either end, with no overflow, or when empty. Scrolls
-are instant. Elsewhere, the existing page wheel classifier applies. A pointer swipe beginning on
-the strip is excluded from page swipes. Pager buttons and their native keyboard activation still
-change pages.
+**Motion.** Removing one card: it fades, scales to 0.92 and lifts 6 px over 180 ms on `cubic-bezier(0.2, 0.8, 0.2, 1)`. Then the item is removed, and the cards after it slide into the gap with `animate:flip` over 180 ms on the same curve. Clear: the unpinned cards of the mode leave with the same motion, 35 ms apart, the last starting by 240 ms, so the whole clear ends by 420 ms. Then the empty state fades in. The animation runs first and the backend is called after it, so the cards never pop. A second click on a card that is leaving is ignored, and Clear is disabled while it runs. Reduced motion: a removed or cleared card disappears at once, the slide is instant, and the mode pill jumps.
 
-**Reduced motion.** The sheen, the drop pulse and the hover lift stop. Cards arrive and leave by fade
-only, and the Copied flash is instant.
+**Drop highlight.** While `shelfDrag` is set, an overlay covers the card row: a 1.5 px dashed 70% white outline in the accent blue, the sheen at 30% over 3.5 s, and an opacity pulse from 0.75 to 1. It fades in and out over 150 ms and takes no pointer events.
+
+**Copied flash.** "Copied" overlays a card for 900 ms, and fades over 150 ms. It shows only after a copy succeeds.
+
+**Scroll rule.** Every wheel over the card row maps the dominant axis to scrollLeft and calls both preventDefault and stopPropagation, even at either end, with no overflow, or when empty. Scrolls are instant. Elsewhere, the existing page wheel classifier applies. A pointer swipe beginning on the card row is excluded from page swipes (`swipeStart`). Pager buttons and their native keyboard activation still change pages.
+
+**Reduced motion.** The sheen, the drop pulse and the hover lift stop. Cards arrive and leave by opacity only, and the Copied flash is instant.
+
+### Shelf drag out (`modules/shelf_drag.rs`)
+
+Pressing a card and moving it more than 6 px (`DRAG_START_PX`, `movedBeyond` in `lib/shelf.ts`) starts a native OLE drag through `shelf_drag_out`. A press that stays inside 6 px is a click, and it copies or opens as before. The drag is a copy, and the item stays on the shelf. A file carries its stored path as `CF_HDROP`, and nothing is moved or deleted. A text card carries its full stored text (up to 2,000 characters, not the 240-character preview) as `CF_UNICODETEXT`.
+
+The source is `IDataObject` and `IDropSource`, and `DoDragDrop` runs on the main thread, which owns OLE. The command is async and returns when the drag ends. The drop source uses the standard rules: Escape cancels, and releasing the button drops. While the drag runs:
+
+- The dragged card dims to 45%.
+- The panel stays open after the pointer leaves the notch (`drag_out` in `state.rs`, which expands like a file drag). It collapses normally afterwards.
+- The native catcher ignores this process's drags (`OWN_DRAG`), so a card dropped back on the notch adds nothing. The catcher stays down for the whole drag.
+
+Edge cases: a missing file is a no-op, with no error. A removed item is ignored. Escape cancels with no drop.
 
 ### Shelf file drop (`modules/shelf_drop.rs`)
 
@@ -616,7 +611,7 @@ pill plus 120 px each side and 60 px down, DPI scaled and clipped to the window)
 held and files are on. It hides when the button is released or the cursor leaves, and when a drag carries
 no files it hides until release. Its `IDropTarget` reads `CF_HDROP`. An enter sets the island's file drag,
 so the panel opens, and `shelf://drag` tells the page to show the Shelf. A drop adds the paths and emits
-`shelf://added`. Leave clears the drag.
+`shelf://added`. Leave clears the drag. A drag that this process starts (a card dragged out, see Shelf drag out above) sets `OWN_DRAG`, and the catcher then refuses it, so the shelf never takes back its own item.
 
 Not verified: Explorer as the drag source, a second monitor, DPI other than 125%, and a
 drag that starts as a text selection and then carries files.
@@ -673,7 +668,7 @@ Both layouts use a 2 px focus ring at 70% white, offset 2 px. Press feedback is 
 - Under reduced motion: shapes and pages change by fade only (150 ms) with no transform, the equaliser
   bars are static, the HUD bar, the battery glyph, the media progress fill and the ring jump instead of gliding, the timer digits crossfade over
   150 ms, the ripple is hidden, the alert glow sits at 35%, the lyric line and stack do not rise, the
-  spinner pulses instead of turning, and tile and media transport presses do not scale. The Shelf sheen and drop pulse stop, and its cards fade only. The timer's mode change is a
+  spinner pulses instead of turning, and tile and media transport presses do not scale. The Shelf sheen and drop pulse stop. Its cards fade only, a removed or cleared card vanishes at once, and the mode pill jumps. The timer's mode change is a
   150 ms opacity crossfade in both settings, because it is a fade and carries no motion.
 - Focus rings: a 2 px outline at 70% white in most places. The pager dots use 1 px at 60%. Never remove
   an outline without a replacement.

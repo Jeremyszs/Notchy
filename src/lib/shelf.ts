@@ -48,3 +48,17 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x:
     return axis(y1, y2, t);
   };
 }
+
+export type ShelfMode = "file" | "text";
+
+/** Files when files are on, or when both are on; Text only when clipboard history is the one on. */
+export function defaultMode(clipboard: boolean, files: boolean): ShelfMode {
+  return clipboard && !files ? "text" : "file";
+}
+
+/** A press becomes a drag once the pointer has moved this far, so a click never starts one. */
+export const DRAG_START_PX = 6;
+
+export function movedBeyond(fromX: number, fromY: number, x: number, y: number, px: number): boolean {
+  return Math.hypot(x - fromX, y - fromY) > px;
+}

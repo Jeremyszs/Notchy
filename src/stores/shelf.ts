@@ -1,12 +1,14 @@
 import { writable } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { ShelfItem } from "../lib/shelf";
+import type { ShelfItem, ShelfMode } from "../lib/shelf";
 import { showShelfDrop } from "./pages";
 
 const store = writable<ShelfItem[]>([]);
 export const shelf = { subscribe: store.subscribe };
 export const shelfDrag = writable(false);
+// The mode the user picked, kept while the app runs. Null until a pick, so the page uses its default.
+export const shelfMode = writable<ShelfMode | null>(null);
 export const shelfConfirmation = writable("");
 let revision = 0;
 let confirmationTimer: ReturnType<typeof setTimeout>;
@@ -20,7 +22,11 @@ void listen<ShelfItem[]>("shelf://update", ({ payload }) => {
 // Rust sees the drag (the catcher window takes the OLE drop), so the page switch lives here.
 void listen<boolean>("shelf://drag", ({ payload }) => {
   shelfDrag.set(payload);
-  if (payload) showShelfDrop();
+  // A file drag always lands on the Files mode.
+  if (payload) {
+    shelfMode.set("file");
+    showShelfDrop();
+  }
 });
 
 // Rust adds the dropped files and reports how many, for the header line.

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { relativeAge, fileName, extension, wheelRoute, cubicBezier } from "./shelf.ts";
+import { relativeAge, fileName, extension, wheelRoute, cubicBezier, defaultMode, movedBeyond, DRAG_START_PX } from "./shelf.ts";
 
 test("relative ages use whole minutes, hours and days, with future times held at now", () => {
   for (const [ms, label] of [[0, "now"], [59_999, "now"], [120_000, "2m"], [3_600_000, "1h"], [259_200_000, "3d"]] as const) {
@@ -31,4 +31,16 @@ test("cubic bezier easing matches the CSS curves at their ends and at the linear
   assert.ok(Math.abs(island(1) - 1) < 1e-6);
   // An ease-out curve is ahead of the linear line in the first half.
   assert.ok(island(0.5) > 0.5);
+});
+test("the default mode is Text only when clipboard is the one switch on", () => {
+  assert.equal(defaultMode(true, false), "text");
+  assert.equal(defaultMode(true, true), "file");
+  assert.equal(defaultMode(false, true), "file");
+  assert.equal(defaultMode(false, false), "file");
+});
+test("a drag starts only past six pixels, measured as a straight line", () => {
+  assert.equal(movedBeyond(0, 0, 4, 4, DRAG_START_PX), false);
+  assert.equal(movedBeyond(0, 0, 6, 0, DRAG_START_PX), false);
+  assert.equal(movedBeyond(0, 0, 6, 1, DRAG_START_PX), true);
+  assert.equal(movedBeyond(10, 10, 10, -10, DRAG_START_PX), true);
 });

@@ -105,6 +105,8 @@ pub enum ActivityKind {
 pub struct Inputs {
     pub hovered: bool,
     pub file_drag: bool,
+    /// The shelf is dragging one of its own items out. Keeps the panel open off the notch.
+    pub drag_out: bool,
     pub media_playing: bool,
     pub fullscreen: bool,
     pub covered: bool,
@@ -141,7 +143,7 @@ pub fn resolve(inputs: Inputs) -> IslandState {
         IslandState::Hidden
     } else if inputs.alert {
         IslandState::Alert
-    } else if inputs.file_drag {
+    } else if inputs.file_drag || inputs.drag_out {
         IslandState::Expanded
     } else if inputs.hovered && inputs.wide {
         IslandState::Lyrics
@@ -170,6 +172,7 @@ pub fn resolve(inputs: Inputs) -> IslandState {
 pub struct IslandStateMachine {
     hovered: bool,
     file_drag: bool,
+    drag_out: bool,
     media_playing: bool,
     fullscreen: bool,
     covered: bool,
@@ -187,6 +190,7 @@ impl IslandStateMachine {
         resolve(Inputs {
             hovered: self.hovered,
             file_drag: self.file_drag,
+            drag_out: self.drag_out,
             media_playing: self.media_playing,
             fullscreen: self.fullscreen,
             covered: self.covered,
@@ -202,6 +206,10 @@ impl IslandStateMachine {
 
     pub fn set_file_drag(&mut self, active: bool) {
         self.file_drag = active;
+    }
+
+    pub fn set_drag_out(&mut self, active: bool) {
+        self.drag_out = active;
     }
 
     pub fn file_drag_active(&self) -> bool {
@@ -305,6 +313,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn drag_out_keeps_the_panel_open_after_the_pointer_leaves() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_covered(true);
+        machine.set_drag_out(true);
+        assert_eq!(machine.current(), IslandState::Expanded);
+        machine.set_hovered(true);
+        machine.set_hovered(false);
+        assert_eq!(machine.current(), IslandState::Expanded);
+        machine.set_fullscreen(true);
+        assert_eq!(machine.current(), IslandState::Hidden);
+        machine.set_fullscreen(false);
+        machine.set_drag_out(false);
+        assert_eq!(machine.current(), IslandState::Tucked);
+    }
+
+    #[test]
     fn file_drag_expands_without_hover_and_yields_to_fullscreen_and_alert() {
         let mut machine = IslandStateMachine::default();
         machine.set_covered(true);
@@ -350,6 +374,7 @@ mod tests {
         Inputs {
             hovered: a.hovered || b.hovered,
             file_drag: a.file_drag || b.file_drag,
+            drag_out: a.drag_out || b.drag_out,
             media_playing: a.media_playing || b.media_playing,
             fullscreen: a.fullscreen || b.fullscreen,
             covered: a.covered || b.covered,
