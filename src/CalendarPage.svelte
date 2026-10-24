@@ -3,7 +3,7 @@
   // backend expands repeating events (calendar_between), so this file only lays them out. The island
   // window cannot take text, so "Add note" opens Settings on the selected day, where the form is.
   import { invoke } from "@tauri-apps/api/core";
-  import { cubicOut } from "svelte/easing";
+  import { SMOOTH_MS, smoothEase } from "./lib/motion";
   import { fade, fly } from "svelte/transition";
   import { calendarEvents, fetchBetween, recentReminder, snooze } from "./stores/calendar";
   import { islandState } from "./stores/island";
@@ -105,7 +105,7 @@
   const motionIn = (node: Element) =>
     REDUCED
       ? fade(node, { duration: 150 })
-      : fly(node, { x: direction * 16, duration: 220, easing: cubicOut });
+      : fly(node, { x: direction * 16, duration: SMOOTH_MS, easing: smoothEase });
   const motionOut = (node: Element) => fade(node, { duration: REDUCED ? 150 : 120 });
 </script>
 

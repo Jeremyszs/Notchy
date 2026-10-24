@@ -6,7 +6,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount, tick } from "svelte";
-  import { cubicOut } from "svelte/easing";
+  import { SMOOTH_MS, smoothEase } from "../lib/motion";
   import { fade, fly } from "svelte/transition";
   import { calendarEvents, fetchBetween } from "../stores/calendar";
   import {
@@ -174,7 +174,7 @@
   const motionIn = (node: Element) =>
     REDUCED
       ? fade(node, { duration: 150 })
-      : fly(node, { x: direction * 16, duration: 220, easing: cubicOut });
+      : fly(node, { x: direction * 16, duration: SMOOTH_MS, easing: smoothEase });
   const motionOut = (node: Element) => fade(node, { duration: REDUCED ? 150 : 120 });
 
   // The island's "Add note" opens this section on its day with the add form. A window that is already

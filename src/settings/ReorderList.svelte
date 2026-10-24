@@ -137,7 +137,7 @@
     height: 56px;
     padding: 0 16px 0 4px;
     background: #111;
-    transition: transform 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+    transition: transform var(--spring-snappy-ms) var(--spring-snappy);
   }
 
   .row + .row::before {

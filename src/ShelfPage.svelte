@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
   import { flip } from "svelte/animate";
+  import { rise } from "./lib/motion";
   import { invoke } from "@tauri-apps/api/core";
   import { shelf, shelfDrag, shelfConfirmation, shelfMode, refreshShelf } from "./stores/shelf";
   import { config } from "./stores/config";
@@ -152,11 +153,10 @@
     strip.scrollLeft += route.delta * unit;
   }
 
-  // A card rises 6 px as it arrives, on the island's curve. Reduced motion keeps a 150 ms fade only.
-  function arrive(_node: Element) {
-    return reduceMotion
-      ? { duration: 150, css: (t: number) => `opacity: ${t}` }
-      : { duration: 220, easing: ease, css: (t: number, u: number) => `opacity: ${t}; transform: translateY(${u * 6}px)` };
+  // A card rises 6 px out of a light blur as it arrives, on the smooth spring. Reduced motion keeps a
+  // 150 ms fade only.
+  function arrive(node: Element) {
+    return rise(node, { y: 6, blur: 2, reduced: reduceMotion });
   }
 </script>
 
@@ -363,7 +363,7 @@
     border-radius: 999px;
     background: linear-gradient(180deg, var(--accent-a), var(--accent-b));
     transform: translateX(0);
-    transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: transform var(--spring-smooth-ms) var(--spring-smooth);
   }
   .tabs[data-mode="text"] .pill { transform: translateX(100%); }
   .tabs button {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { fade, fly } from "svelte/transition";
-  import { cubicOut } from "svelte/easing";
+  import { SMOOTH_MS, smoothEase } from "./lib/motion";
   import {
     controls,
     visibleControls,
@@ -200,7 +200,7 @@
   {#if view}
     <div
       class="sheet"
-      in:fly={{ x: reduceMotion ? 0 : 24, duration: 220, easing: cubicOut }}
+      in:fly={{ x: reduceMotion ? 0 : 24, duration: SMOOTH_MS, easing: smoothEase }}
       out:fade={{ duration: 160 }}
     >
       <NetworkList kind={view} onBack={() => (view = null)} />

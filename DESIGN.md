@@ -12,7 +12,8 @@ number below comes from the code. If you change a number, change it here too.
 - **Apple reference.** The island reads as a physical notch that grows. Shapes spring open from the top
   centre, the outline flares out of the top edge with concave ears, and the bottom corners stay convex.
   Nothing has a border or a shadow except the alert glow.
-- **Only `transform` and `opacity` animate.** Layout is never animated. Widths and heights are set
+- **Only `transform`, `opacity` and a light `filter: blur` animate.** Blur is only for content arriving
+  or leaving (at most 6 px, and none under reduced motion). Layout is never animated. Widths and heights are set
   once per state, and each shape scales from its previous size. Every existing transition and keyframe
   follows this. Colour changes are instant, or they change `opacity` on a copy of the colour. Do not add
   `background-color`, `width`, `height`, `top` or `margin` transitions.
@@ -323,28 +324,47 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 
 ## 6. Motion
 
-Times and curves used in code. Keep them unless you have measured a reason.
+Every curve comes from the three springs in `src/lib/motion.ts`. A spring is described as SwiftUI does
+(`response` in seconds, `bounce` 0 for none). `main.ts` and `settings/main.ts` put each one on the root
+as a CSS `linear()` easing and its settle time: `--spring-<name>` and `--spring-<name>-ms`. Svelte
+transitions use `smoothEase` and friends, and `rise` is the shared "arrive" transition. Do not add a new
+`cubic-bezier`; pick a spring. The timer digit roll (`lib/roll.ts`) and the Shelf delete and clear
+choreography keep their tested curves.
+
+| Spring | response, bounce | Settles in | Used for |
+| --- | --- | --- | --- |
+| snappy | 0.28 s, 0 | 378 ms | presses, the HUD bar, anything getting smaller |
+| smooth | 0.42 s, 0 | 566 ms | content, pages, height, the island sliding; never overshoots |
+| bouncy | 0.48 s, 0.25 | 676 ms | width growing, the album art flight, the Settings switch; peak about 1.03 |
+
+A spring transition retargets from wherever it is, so an interrupted change reverses from the current
+frame. Times below are settle times; most of the movement is done in the first half.
 
 | Motion | Duration | Curve | Property |
 | --- | --- | --- | --- |
-| Island slides (show or hide) | 450 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform (`.island`), opacity 180 ms ease |
-| Shape width (springs open) | 450 ms | `cubic-bezier(0.34, 1.3, 0.64, 1)`, peak about 1.03 | transform scaleX (`.shape`) |
-| Shape height (must not overshoot) | 450 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform scaleY (`.frame`) |
-| Content leaves | 120 ms | ease | opacity |
-| Content enters | 200 ms, after 120 ms | ease | opacity |
-| Page change | 220 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform (16 px slide) and opacity 220 ms ease |
+| Island slides (show or hide) | smooth spring | `--spring-smooth` | transform (`.island`), opacity 180 ms ease |
+| Shape width (springs open) | bouncy spring, peak about 1.03 | `--spring-bouncy` | transform scaleX (`.shape`) |
+| Shape height (must not overshoot) | smooth spring | `--spring-smooth` | transform scaleY (`.frame`) |
+| Content leaves | 110 ms | ease | opacity, filter blur 0 to 3 px, transform scale 1 to 0.96 about the top centre |
+| Shape getting smaller (`.island.shrink`) | snappy spring, both axes | `--spring-snappy` | transform. Chosen when the new body has less area than the last |
+| Content enters | smooth spring, after 60 ms (opacity 200 ms ease) | `--spring-smooth` | opacity, filter blur 3 px to none, transform scale 0.96 to 1 |
+| Panel rows arrive (`.rise`) | smooth spring, 90 ms + 35 ms per row (`--i`); opacity 220 ms ease | `--spring-smooth` | opacity and transform translateY 6 px. Media page: art row, lyric, transport, pager. Lyrics layout: side, stack, pager. A page that turns shown replays it |
+| Album art carries across (`flyArt`) | bouncy spring | `--spring-bouncy` (Web Animations) | a copy outside the shapes flies from the old art to the new one (pill, panel, lyrics); both real ones hide until it lands |
+| Page change | smooth spring | `--spring-smooth` | transform (16 px slide) and opacity 220 ms ease |
+| Pager thumb | smooth spring; a stretch of scaleX 1.6 + 0.6 per page moved, peak at 35% of 0.7 x smooth, ease-out | `--spring-smooth` | transform translateX (20 px per dot) on `.thumb`, scaleX on its inner dot. Reduced motion: it jumps |
 | Timer mode crossfade (content below the selector) | 150 ms | linear (Svelte `fade`) | opacity only; the selector does not move |
-| Panel sub-view (Wi-Fi, Bluetooth) | 220 ms, fly 24 px | cubic-out | transform; leaves with a 160 ms fade |
+| Panel sub-view (Wi-Fi, Bluetooth) | smooth spring, fly 24 px | `smoothEase` | transform; leaves with a 160 ms fade |
 | Controls grid while a sub-view is open | 160 ms | ease | opacity |
-| Lyric line change | 180 ms | Svelte fly, rises 4 px | transform and opacity |
-| Lyrics stack change | 220 ms, rises 10 px; old block fades 180 ms | | transform and opacity |
+| Lyric line change | smooth spring | `rise` (lib/motion.ts), rises 4 px out of a 4 px blur | transform, filter and opacity |
+| Lyrics stack change | smooth spring, rises 10 px out of a 6 px blur; old block fades 180 ms | `rise` | transform, filter and opacity |
 | Lyrics tint crossfade | 400 ms | | opacity |
-| HUD bar | 120 ms | ease-out | transform scaleX |
-| Battery glyph fill | 320 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform scaleX, origin left |
-| Calendar reminder text change | 200 ms in, 120 ms out | ease | opacity (keyed on the reminder's `seq`) |
-| Battery text change | 200 ms in, 120 ms out | ease | opacity (keyed on the event) |
+| HUD bar | snappy spring | `--spring-snappy` | transform scaleX |
+| Battery glyph fill | smooth spring | `--spring-smooth` | transform scaleX, origin left |
+| Calendar reminder text change | `rise` in (3 px, 3 px blur), 120 ms fade out | smooth spring | opacity, transform, filter (keyed on the reminder's `seq`) |
+| Battery text change | `rise` in (3 px, 3 px blur), 120 ms fade out | smooth spring | opacity, transform, filter (keyed on the event) |
 | HUD icon | 160 ms in, 110 ms out | | opacity |
-| Notification text change | 200 ms in, 120 ms out (fade, and the outgoing text stays in the same cell) | ease | opacity |
+| Notification text change | `rise` in (3 px, 3 px blur), 120 ms fade out; the outgoing text stays in the same cell | smooth spring | opacity, transform, filter |
+| Media pill title change | `rise` in (3 px, 3 px blur), 120 ms fade out | smooth spring | opacity, transform, filter |
 | Timer digit roll | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)`, 150 ms crossfade under reduced motion | transform and opacity |
 | Last-ten-seconds beat | 300 ms | ease-out, scale 1 to 1.06 to 1 | transform |
 | Finished ring ripple | 900 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)`, scale 1 to 2.6 | transform and opacity |
@@ -353,17 +373,17 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Equaliser bars (live) | 70 ms | ease-out per 30 Hz frame | transform |
 | Timer ring sweep | 1 s | linear | transform on each half disc |
 | Paused digits | 320 ms | ease | opacity |
-| Press feedback on tiles and media transport | 120 ms | ease | transform scale 0.94, opacity 0.7 |
+| Press feedback on tiles and media transport | transport: 60 ms down, snappy spring back up; tiles: 120 ms ease | `--spring-snappy` | transform scale 0.92 (transport) or 0.94 (tiles), opacity 0.7 |
 | Armed lock tile | | | transform scale 1.1, outline 2 px |
 | Spinner and pulse | 800 ms linear; 1200 ms ease-in-out | | transform, opacity |
-| Settings month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform and opacity. Reduced motion: a 150 ms fade, no slide |
-| Island calendar month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | cubic-out (Svelte `fly`) | transform and opacity. Reduced motion: a 150 ms fade, no slide |
+| Settings month slide | smooth spring, the new month slides 16 px; the old one fades 120 ms | `smoothEase` (Svelte `fly`) | transform and opacity. Reduced motion: a 150 ms fade, no slide |
+| Island calendar month slide | smooth spring, the new month slides 16 px; the old one fades 120 ms | `smoothEase` (Svelte `fly`) | transform and opacity. Reduced motion: a 150 ms fade, no slide |
 | Media progress fill | 250 ms, linear, one step per tick (the clock ticks 4 times a second while it runs) | linear | transform scaleX. A drag has no transition, and reduced motion jumps |
 | Shelf sheen (empty card, 14 s) | 12 s loop | linear, infinite | transform translateX over a 300% gradient layer, one gradient cycle per loop |
 | Shelf drop highlight sheen | 3.5 s loop | linear, infinite | transform, as above; the outline's opacity pulses 0.75 to 1 over 3.5 s |
-| Shelf mode pill slides | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)` | transform translateX (one pill width). Reduced motion: it jumps |
+| Shelf mode pill slides | smooth spring | `--spring-smooth` | transform translateX (one pill width). Reduced motion: it jumps |
 | Shelf mode rows change | 160 ms in, 120 ms out | ease | opacity only |
-| Shelf card arrives | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)` | opacity and transform translateY 6 px to 0 |
+| Shelf card arrives | smooth spring | `rise` (6 px, 2 px blur) | opacity, filter and transform translateY 6 px to 0 |
 | Shelf card removed | 180 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)` | opacity 1 to 0, transform translateY 0 to -6 px and scale 1 to 0.92 (Web Animations, filled). The cards after it slide with `animate:flip` over 180 ms, same curve |
 | Shelf clear | 35 ms stagger, last card starts by 240 ms, 180 ms each | as above | as the removed card. The whole clear ends by 420 ms, then the empty state fades in over 180 ms |
 | Shelf card dims while dragged out | 150 ms | ease | opacity to 0.45 |
@@ -667,7 +687,7 @@ Both layouts use a 2 px focus ring at 70% white, offset 2 px. Press feedback is 
   restart. Keep both in step when you add a motion.
 - Under reduced motion: shapes and pages change by fade only (150 ms) with no transform, the equaliser
   bars are static, the HUD bar, the battery glyph, the media progress fill and the ring jump instead of gliding, the timer digits crossfade over
-  150 ms, the ripple is hidden, the alert glow sits at 35%, the lyric line and stack do not rise, the
+  150 ms, the ripple is hidden, the alert glow sits at 35%, the lyric line and stack do not rise, content fades in without blur or scale, panel rows do not rise, the album art does not fly (each shape shows its own), the pager thumb jumps, the
   spinner pulses instead of turning, and tile and media transport presses do not scale. The Shelf sheen and drop pulse stop. Its cards fade only, a removed or cleared card vanishes at once, and the mode pill jumps. The timer's mode change is a
   150 ms opacity crossfade in both settings, because it is a fade and carries no motion.
 - Focus rings: a 2 px outline at 70% white in most places. The pager dots use 1 px at 60%. Never remove

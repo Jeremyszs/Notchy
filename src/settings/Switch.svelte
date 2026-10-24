@@ -62,7 +62,7 @@
     border-radius: 50%;
     background: #fff;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-    transition: transform 220ms cubic-bezier(0.3, 0.7, 0.4, 1);
+    transition: transform var(--spring-bouncy-ms) var(--spring-bouncy);
   }
 
   .knob::after {

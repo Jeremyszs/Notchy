@@ -37,7 +37,9 @@
   import { invoke } from "@tauri-apps/api/core";
   import { shelfDrag, clearShelfDrag } from "./stores/shelf";
   import { showShelfDrop } from "./stores/pages";
-  import { fade, fly } from "svelte/transition";
+  import { fade } from "svelte/transition";
+  import { onDestroy, tick } from "svelte";
+  import { BOUNCY, BOUNCY_MS, SMOOTH_MS, rise, springCss } from "./lib/motion";
   import { islandPath } from "./lib/shape";
   import { DEFAULT_FIT, fitTrack } from "./lib/lyricsFit";
   import { createWheelGesture } from "./lib/wheel";
@@ -141,9 +143,11 @@
   const reduceMotion =
     typeof matchMedia === "function" &&
     matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const lineIn = { duration: 180, y: reduceMotion ? 0 : 4 };
-  // The lyrics stack moves as one block: it rises 10px while it fades in, and the old block fades.
-  const stackIn = { duration: 220, y: reduceMotion ? 0 : 10 };
+  const lineIn = { y: 4, reduced: reduceMotion };
+  // The lyrics stack moves as one block: it rises 10px out of a blur, and the old block fades.
+  const stackIn = { y: 10, blur: 6, reduced: reduceMotion };
+  // Text that changes in place inside a pill: a short rise out of a blur.
+  const textIn = { y: 3, blur: 3, duration: SMOOTH_MS, reduced: reduceMotion };
   $: lyricLine =
     $lyricsState.status === "synced" ? ($currentLine?.current ?? "") : "";
   $: sourceLine =
@@ -186,8 +190,15 @@
   );
 
   // Hidden keeps the last visible size, so the next state springs up from where the island was.
+  // Getting smaller uses the quicker spring without overshoot (`.island.shrink`).
   let shown: Shown = "idle";
-  $: if ($islandState !== "hidden") shown = $islandState;
+  let shrinking = false;
+  $: if ($islandState !== "hidden") {
+    const next = sizeOf($islandState);
+    const last = sizeOf(shown);
+    shrinking = next.w * next.h < last.w * last.h;
+    shown = $islandState;
+  }
 
   // Each shape is mounted at its native size, so its corners are never scaled at rest.
   // The shown shape sits at scale 1. The others are parked at the shown size and hidden.
@@ -306,6 +317,95 @@
     };
   }
 
+  // The album art carries across a change of state: a copy flies from where the art was to where it
+  // lands in the new shape, on the bouncy spring, while both real ones are hidden. The copy lives
+  // outside the scaled shapes, so it is never stretched.
+  let islandEl: HTMLDivElement;
+  let lastState: IslandState = "hidden";
+  let flight: { ghost: HTMLElement; hidden: HTMLElement[]; anim: Animation } | null = null;
+  const FLIGHT_EASE = springCss(BOUNCY);
+
+  function artSelector(state: IslandState): string | null {
+    if (!$mediaState.active) return null;
+    if (state === "active") return ".shape.active .art.sm";
+    if (state === "lyrics") return ".shape.lyrics .art.xl";
+    if (state === "expanded" && $page === "media") return ".shape.expanded .page.on .art.lg";
+    return null;
+  }
+
+  // Where an element sits at rest, relative to the island: offsets ignore every transform.
+  function restingBox(el: HTMLElement): { x: number; y: number; w: number; h: number } {
+    let x = 0;
+    let y = 0;
+    let node: HTMLElement | null = el;
+    while (node && node !== islandEl) {
+      x += node.offsetLeft;
+      y += node.offsetTop;
+      node = node.offsetParent as HTMLElement | null;
+    }
+    return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+  }
+
+  function endFlight() {
+    if (!flight) return;
+    flight.anim.cancel();
+    flight.ghost.remove();
+    for (const el of flight.hidden) el.style.visibility = "";
+    flight = null;
+  }
+
+  $: void flyArt($islandState);
+
+  async function flyArt(state: IslandState) {
+    const from = lastState;
+    lastState = state;
+    if (reduceMotion || !islandEl || from === state) return;
+    const fromSelector = artSelector(from);
+    endFlight();
+    const source = fromSelector ? islandEl.querySelector<HTMLElement>(fromSelector) : null;
+    if (!source) return;
+    const start = source.getBoundingClientRect();
+    const origin = islandEl.getBoundingClientRect();
+    await tick();
+    if (lastState !== state) return;
+    const toSelector = artSelector(state);
+    const target = toSelector ? islandEl.querySelector<HTMLElement>(toSelector) : null;
+    if (!target || target === source || start.width === 0) return;
+    const end = restingBox(target);
+    const ghost = source.cloneNode(true) as HTMLElement;
+    ghost.classList.add("art-ghost");
+    ghost.style.cssText = `left:${end.x}px;top:${end.y}px;width:${end.w}px;height:${end.h}px`;
+    islandEl.appendChild(ghost);
+    source.style.visibility = "hidden";
+    target.style.visibility = "hidden";
+    const dx = start.left - origin.left - end.x;
+    const dy = start.top - origin.top - end.y;
+    const anim = ghost.animate(
+      [{ transform: `translate(${dx}px, ${dy}px) scale(${start.width / end.w})` }, { transform: "none" }],
+      { duration: BOUNCY_MS, easing: FLIGHT_EASE },
+    );
+    flight = { ghost, hidden: [source, target], anim };
+    anim.onfinish = endFlight;
+  }
+
+  onDestroy(endFlight);
+
+  // The pager's bright dot stretches while it travels to the next page, then settles round.
+  function stretch(node: HTMLElement, index: number) {
+    let last = index;
+    return {
+      update(next: number) {
+        const moved = Math.abs(next - last);
+        last = next;
+        if (moved === 0 || reduceMotion) return;
+        node.animate(
+          [{ transform: "scaleX(1)" }, { transform: `scaleX(${1.6 + moved * 0.6})`, offset: 0.35 }, { transform: "scaleX(1)" }],
+          { duration: SMOOTH_MS * 0.7, easing: "ease-out" },
+        );
+      },
+    };
+  }
+
   function swipeEnd(event: PointerEvent) {
     if (!swipeFrom) return;
     const dx = event.clientX - swipeFrom.x;
@@ -333,7 +433,7 @@
 {/snippet}
 
 {#snippet transport(compact: boolean)}
-  <div class="controls" class:compact>
+  <div class="controls" class:compact class:rise={!compact} style="--i: 2">
     <button type="button" aria-label="Previous" onclick={previous}>
       <svg viewBox="0 0 24 24" aria-hidden="true"
         ><path d="M6 6h2v12H6zM18 6v12l-8.5-6z" /></svg
@@ -361,20 +461,28 @@
   </div>
 {/snippet}
 
-{#snippet pager()}
-  <div class="pager">
-    {#each $enabledPages as id (id)}
-      <button
-        type="button"
-        class="dot"
-        class:on={$page === id}
-        aria-label="{PAGE_LABELS[id]} page"
-        aria-current={$page === id ? "true" : undefined}
-        onclick={() => go(id)}
-      >
-        <span></span>
-      </button>
-    {/each}
+{#snippet pager(order: number)}
+  {@const index = $enabledPages.indexOf($page)}
+  <div class="pager rise" style="--i: {order}">
+    <div class="dots">
+      {#each $enabledPages as id (id)}
+        <button
+          type="button"
+          class="dot"
+          class:on={$page === id}
+          aria-label="{PAGE_LABELS[id]} page"
+          aria-current={$page === id ? "true" : undefined}
+          onclick={() => go(id)}
+        >
+          <span></span>
+        </button>
+      {/each}
+      {#if index >= 0}
+        <span class="thumb" style="transform: translateX({index * 20}px)" aria-hidden="true">
+          <span use:stretch={index}></span>
+        </span>
+      {/if}
+    </div>
   </div>
 {/snippet}
 
@@ -421,7 +529,7 @@
   </svg>
 {/snippet}
 
-<div class="island" class:hidden={$islandState === "hidden"}>
+<div class="island" class:hidden={$islandState === "hidden"} class:shrink={shrinking} bind:this={islandEl}>
   <div
     class="shape idle"
     class:on={$islandState === "idle"}
@@ -448,7 +556,7 @@
         {@render albumArt("sm")}
         <div class="active-title">
           {#key activeLabel}
-            <span in:fade={{ duration: 200 }} out:fade={{ duration: 200 }}>
+            <span in:rise={textIn} out:fade={{ duration: 120 }}>
               {activeLabel}
             </span>
           {/key}
@@ -537,7 +645,7 @@
         <span class="notice-badge" aria-hidden="true">{noticeBadge}</span>
         <div class="notice-copy" role="status">
           {#key $notice.seq}
-            <p class="notice-text" in:fade={{ duration: 200 }} out:fade={{ duration: 120 }}>
+            <p class="notice-text" in:rise={textIn} out:fade={{ duration: 120 }}>
               <span class="notice-title">{$notice.title}</span>{#if $notice.body}{" "}<span class="notice-body">{$notice.body}</span>{/if}
             </p>
           {/key}
@@ -573,7 +681,7 @@
         </svg>
         <div class="battery-copy" role="status">
           {#key batteryKey}
-            <p class="battery-text" in:fade={{ duration: 200 }} out:fade={{ duration: 120 }}>
+            <p class="battery-text" in:rise={textIn} out:fade={{ duration: 120 }}>
               <span class="battery-label">{batteryWords}</span>
               <span class="battery-level">{batteryLevel}</span>
             </p>
@@ -597,7 +705,7 @@
         </svg>
         <div class="calendar-copy" role="status">
           {#key $reminder.seq}
-            <p class="calendar-text" in:fade={{ duration: 200 }} out:fade={{ duration: 120 }}>
+            <p class="calendar-text" in:rise={textIn} out:fade={{ duration: 120 }}>
               <span class="calendar-title">{$reminder.title}</span>
               <span class="calendar-when">{relativeLabel($reminder.minutesUntil)}</span>
             </p>
@@ -666,7 +774,7 @@
                 <CalendarPage />
               {:else if id === "media"}
                 {#if $mediaState.active}
-                  <div class="now">
+                  <div class="now rise" style="--i: 0">
                     {@render albumArt("lg")}
                     <div class="meta">
                       <div class="title">{$mediaState.title}</div>
@@ -674,10 +782,10 @@
                       <MediaProgress />
                     </div>
                   </div>
-                  <div class="lyric">
+                  <div class="lyric rise" style="--i: 1">
                     {#if lyricLine}
                       {#key lyricLine}
-                        <p class="line" in:fly={lineIn} out:fade={{ duration: 180 }}>
+                        <p class="line" in:rise={lineIn} out:fade={{ duration: 180 }}>
                           {lyricLine}
                         </p>
                       {/key}
@@ -698,7 +806,7 @@
           {/each}
         </div>
         {#if $enabledPages.length > 1}
-          {@render pager()}
+          {@render pager(3)}
         {/if}
       </div>
     </div>
@@ -751,7 +859,7 @@
       {/key}
       <div class="content wide" style="--ls: {lyricsFit.scale}">
         <div class="wide-body">
-          <div class="side">
+          <div class="side rise" style="--i: 0">
             <div class="now-wide">
               {@render albumArt("xl")}
               <div class="meta">
@@ -762,9 +870,9 @@
             <MediaProgress />
             {@render transport(true)}
           </div>
-          <div class="stack-wrap">
+          <div class="stack-wrap rise" style="--i: 1">
             {#key stackKey}
-              <div class="stack" in:fly={stackIn} out:fade={{ duration: 180 }}>
+              <div class="stack" in:rise={stackIn} out:fade={{ duration: 180 }}>
                 <p class="ctx">{lyricWindow.prev}</p>
                 <p class="cur"><span>{lyricWindow.current}</span></p>
                 <p class="ctx">{lyricWindow.next}</p>
@@ -773,7 +881,7 @@
           </div>
         </div>
         {#if $enabledPages.length > 1}
-          {@render pager()}
+          {@render pager(2)}
         {/if}
       </div>
     </div>
@@ -799,7 +907,7 @@
     /* Only the shapes that are on take clicks, so the rest of the window passes through. */
     pointer-events: none;
     transition:
-      transform 450ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform var(--spring-smooth-ms) var(--spring-smooth),
       opacity 180ms ease;
   }
 
@@ -809,7 +917,7 @@
     transform: translateY(-110%);
   }
 
-  /* Width scale keeps a gentle spring (peak about 1.03). Scale is about the top centre. */
+  /* Width grows on the bouncy spring (peak about 1.03). Scale is about the top centre. */
   .shape {
     position: absolute;
     top: 0;
@@ -819,7 +927,7 @@
     opacity: 0;
     will-change: transform, opacity;
     transition:
-      transform 450ms cubic-bezier(0.34, 1.3, 0.64, 1),
+      transform var(--spring-bouncy-ms) var(--spring-bouncy),
       opacity 180ms ease;
   }
 
@@ -832,12 +940,33 @@
     height: 100%;
     transform-origin: top center;
     will-change: transform;
-    transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--spring-smooth-ms) var(--spring-smooth);
+  }
+
+  /* Getting smaller is quicker and never overshoots, as a closing sheet is on iOS. */
+  .island.shrink .shape {
+    transition:
+      transform var(--spring-snappy-ms) var(--spring-snappy),
+      opacity 180ms ease;
+  }
+
+  .island.shrink .frame {
+    transition-duration: var(--spring-snappy-ms);
+    transition-timing-function: var(--spring-snappy);
   }
 
   .shape.on {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* The album art copy that flies between shapes (see flyArt). It keeps the .art look. */
+  :global(.art-ghost) {
+    position: absolute;
+    z-index: 1;
+    margin: 0;
+    transform-origin: top left;
+    pointer-events: none;
   }
 
   /* The outline starts BLEED px above the window top. The window clips at y=0. */
@@ -851,7 +980,8 @@
     fill: #000;
   }
 
-  /* Content leaves before its shape fades, and enters after the shape has started. */
+  /* Content leaves at once, softening and shrinking towards the top edge. It enters 60 ms after its
+     shape starts to grow, and sharpens out of a light blur as it settles. */
   .content {
     position: absolute;
     top: 0;
@@ -862,12 +992,49 @@
     color: #fff;
     font: 500 13px/1.2 var(--font);
     opacity: 0;
-    transition: opacity 120ms ease;
+    filter: blur(3px);
+    transform: scale(0.96);
+    transform-origin: top center;
+    transition:
+      opacity 110ms ease,
+      filter 110ms ease,
+      transform 110ms ease;
   }
 
   .shape.on .content {
     opacity: 1;
-    transition: opacity 200ms ease 120ms;
+    filter: none;
+    transform: none;
+    transition:
+      opacity 200ms ease 60ms,
+      filter var(--spring-smooth-ms) var(--spring-smooth) 60ms,
+      transform var(--spring-smooth-ms) var(--spring-smooth) 60ms;
+  }
+
+  /* Panel rows arrive one after another, 35 ms apart, after the content itself. A page that turns
+     shown plays the same arrival, so a page change cascades too. */
+  .rise {
+    opacity: 0;
+    transform: translateY(6px);
+    transition:
+      opacity 100ms ease,
+      transform 100ms ease;
+  }
+
+  .shape.on .rise {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 220ms ease calc(90ms + var(--i, 0) * 35ms),
+      transform var(--spring-smooth-ms) var(--spring-smooth) calc(90ms + var(--i, 0) * 35ms);
+  }
+
+  .shape.on .page:not(.on) .rise {
+    opacity: 0;
+    transform: translateY(6px);
+    transition:
+      opacity 100ms ease,
+      transform 100ms ease;
   }
 
   .compact {
@@ -1058,7 +1225,7 @@
     position: absolute;
     inset: 0;
     transform-origin: left center;
-    transition: transform 120ms ease-out;
+    transition: transform var(--spring-snappy-ms) var(--spring-snappy);
     background: linear-gradient(to right, #7dd3fc, #ffffff);
   }
 
@@ -1162,7 +1329,7 @@
     fill: var(--c);
     transform-box: fill-box;
     transform-origin: left center;
-    transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--spring-smooth-ms) var(--spring-smooth);
   }
 
   .battery-glyph .glyph-body {
@@ -1299,7 +1466,7 @@
     transform: translateX(var(--x, 0px));
     opacity: 0;
     transition:
-      transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform var(--spring-smooth-ms) var(--spring-smooth),
       opacity 220ms ease;
   }
 
@@ -1334,17 +1501,37 @@
     cursor: pointer;
   }
 
+  .dots {
+    position: relative;
+    display: flex;
+    gap: 4px;
+  }
+
   .dot span {
     width: 5px;
     height: 5px;
     border-radius: 50%;
     background: #fff;
     opacity: 0.35;
-    transition: opacity 220ms ease;
   }
 
-  .dot.on span {
-    opacity: 1;
+  /* One bright dot glides between the dim ones, and stretches while it travels (see `stretch`). */
+  .thumb {
+    position: absolute;
+    top: 5.5px;
+    left: 5.5px;
+    width: 5px;
+    height: 5px;
+    pointer-events: none;
+    transition: transform var(--spring-smooth-ms) var(--spring-smooth);
+  }
+
+  .thumb span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 2.5px;
+    background: #fff;
   }
 
   .dot:focus-visible {
@@ -1428,7 +1615,9 @@
     background: transparent;
     color: #fff;
     cursor: pointer;
-    transition: transform 120ms ease, opacity 120ms ease;
+    transition:
+      transform var(--spring-snappy-ms) var(--spring-snappy),
+      opacity 120ms ease;
   }
 
   .controls button.play {
@@ -1441,9 +1630,11 @@
     outline-offset: 2px;
   }
 
+  /* The press lands at once; the release springs back. */
   .controls button:active {
-    transform: scale(0.94);
+    transform: scale(0.92);
     opacity: 0.7;
+    transition-duration: 60ms;
   }
 
   .controls button:hover {
@@ -1884,6 +2075,20 @@
     .page {
       transform: none !important;
       transition: opacity 150ms ease;
+    }
+
+    /* Content still fades in after its shape, but does not blur, shrink or rise. */
+    .content,
+    .shape.on .content,
+    .rise,
+    .shape.on .rise,
+    .shape.on .page:not(.on) .rise {
+      filter: none;
+      transform: none;
+    }
+
+    .thumb {
+      transition: none;
     }
 
     .bars span {
