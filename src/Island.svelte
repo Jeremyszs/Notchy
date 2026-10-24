@@ -1528,13 +1528,13 @@
     min-width: 0;
   }
 
-  /* The title and the artist fill the art's 88 px: a two-line title (2 x 28), an 8 px gap and the
-     artist's 24 px line. The title sits on the art's top edge and the artist on its bottom edge,
-     so a one-line title still spans the same height. */
+  /* The title and the artist stay together as one block, centred on the art's 88 px height. A
+     one-line title leaves equal space above and below; a two-line title (2 x 28, a 4 px gap and
+     the artist's 24 px line) fills the height. */
   .now-wide .meta {
     align-self: stretch;
-    justify-content: space-between;
-    gap: 8px;
+    justify-content: center;
+    gap: 4px;
   }
 
   /* Two lines at most, and a word too long for the column breaks by character, so the second line
