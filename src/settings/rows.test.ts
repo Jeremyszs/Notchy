@@ -1,85 +1,40 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  ROW_HEIGHT,
-  dropIndex,
-  moveRow,
-  ordered,
-  rowOffset,
-  settleOffset,
-  type Row,
-} from "./rows.ts";
+import { arrange, moveId, nearestSlot, ordered, showRow, type Row } from "./rows.ts";
 
-const row = (id: string): Row => ({ id, label: id, on: true, enabled: true });
+const row = (id: string, on: boolean): Row => ({ id, label: id.toUpperCase(), on, enabled: true });
 
 test("ordered keeps shown ids first in shown order, then the rest", () => {
   assert.deepEqual(ordered(["a", "b", "c", "d"], ["c", "a"]), ["c", "a", "b", "d"]);
   assert.deepEqual(ordered(["a", "b"], ["z", "b"]), ["b", "a"]);
 });
 
-test("moveRow moves a row and returns the same array when nothing moves", () => {
-  const rows = ["a", "b", "c"].map(row);
-  assert.deepEqual(
-    moveRow(rows, "a", 2).map((r) => r.id),
-    ["b", "c", "a"],
-  );
-  assert.deepEqual(
-    moveRow(rows, "c", 0).map((r) => r.id),
-    ["c", "a", "b"],
-  );
-  assert.equal(moveRow(rows, "b", 1), rows);
-  assert.equal(moveRow(rows, "b", 3), rows);
-  assert.equal(moveRow(rows, "missing", 0), rows);
+test("moveId moves an id and returns the same array when nothing moves", () => {
+  const ids = ["a", "b", "c"];
+  assert.deepEqual(moveId(ids, "a", 2), ["b", "c", "a"]);
+  assert.deepEqual(moveId(ids, "c", 0), ["c", "a", "b"]);
+  assert.equal(moveId(ids, "b", 1), ids);
+  assert.equal(moveId(ids, "x", 0), ids);
+  assert.equal(moveId(ids, "a", 3), ids);
 });
 
-test("dropIndex snaps to whole rows and clamps to the list", () => {
-  assert.equal(dropIndex(0, 0, 4), 0);
-  assert.equal(dropIndex(0, ROW_HEIGHT * 0.4, 4), 0);
-  assert.equal(dropIndex(0, ROW_HEIGHT * 0.6, 4), 1);
-  assert.equal(dropIndex(1, -ROW_HEIGHT * 2, 4), 0);
-  assert.equal(dropIndex(2, ROW_HEIGHT * 10, 4), 3);
+test("arrange puts the shown ids first in their order and switches the rest off", () => {
+  const rows = [row("a", true), row("b", true), row("c", false), row("d", false)];
+  const next = arrange(rows, ["c", "a"]);
+  assert.deepEqual(next.map((r) => [r.id, r.on]), [["c", true], ["a", true], ["b", false], ["d", false]]);
+  assert.equal(next[0].label, "C");
+  assert.deepEqual(arrange(rows, ["zzz"]).map((r) => r.on), [false, false, false, false]);
 });
 
-test("a dragged row follows the pointer and rows in its path step aside", () => {
-  // Row 0 dragged down to index 2: rows 1 and 2 step up one row, row 3 stays.
-  const drag = { id: "a", from: 0, to: 2, dy: 100 };
-  assert.equal(rowOffset("a", 0, drag, null), 100);
-  assert.equal(rowOffset("b", 1, drag, null), -ROW_HEIGHT);
-  assert.equal(rowOffset("c", 2, drag, null), -ROW_HEIGHT);
-  assert.equal(rowOffset("d", 3, drag, null), 0);
+test("showRow adds to the end of the shown rows and removes without moving the others", () => {
+  const rows = [row("a", true), row("b", true), row("c", false)];
+  assert.deepEqual(showRow(rows, "c", true).map((r) => [r.id, r.on]), [["a", true], ["b", true], ["c", true]]);
+  assert.deepEqual(showRow(rows, "a", false).map((r) => [r.id, r.on]), [["b", true], ["a", false], ["c", false]]);
 });
 
-test("a row dragged up steps down past the rows it passes", () => {
-  const drag = { id: "c", from: 2, to: 0, dy: -110 };
-  assert.equal(rowOffset("a", 0, drag, null), ROW_HEIGHT);
-  assert.equal(rowOffset("b", 1, drag, null), ROW_HEIGHT);
-  assert.equal(rowOffset("c", 2, drag, null), -110);
-  assert.equal(rowOffset("d", 3, drag, null), 0);
-});
-
-test("with no drag and no settle every row sits in its slot", () => {
-  assert.equal(rowOffset("a", 0, null, null), 0);
-});
-
-test("the settling row keeps its offset and the others are at rest", () => {
-  const settle = { id: "b", y: -26 };
-  assert.equal(rowOffset("b", 1, null, settle), -26);
-  assert.equal(rowOffset("a", 0, null, settle), 0);
-  assert.equal(rowOffset("c", 2, null, settle), 0);
-});
-
-test("a new drag takes precedence over a row still settling", () => {
-  const settle = { id: "b", y: -26 };
-  const drag = { id: "c", from: 2, to: 2, dy: 5 };
-  assert.equal(rowOffset("b", 1, drag, settle), 0);
-  assert.equal(rowOffset("c", 2, drag, settle), 5);
-});
-
-test("settleOffset keeps the row under the pointer in its new slot", () => {
-  // Moved 30px down: lands one slot lower, so it sits 26px above its slot and glides down.
-  assert.equal(settleOffset(30, 0, 1), 30 - ROW_HEIGHT);
-  // Moved exactly two rows: no residual offset.
-  assert.equal(settleOffset(2 * ROW_HEIGHT, 0, 2), 0);
-  // Moved up one row, 10px short of the slot: sits 10px below its slot.
-  assert.equal(settleOffset(-ROW_HEIGHT + 10, 2, 1), 10);
+test("nearestSlot picks the closest centre and is -1 with no slots", () => {
+  const slots = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 100 }];
+  assert.equal(nearestSlot(slots, 70, 10), 1);
+  assert.equal(nearestSlot(slots, 10, 60), 2);
+  assert.equal(nearestSlot([], 0, 0), -1);
 });

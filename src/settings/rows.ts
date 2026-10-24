@@ -1,18 +1,15 @@
-// The row model behind the settings lists. Pure helpers, so the ordering rules stay out of the markup.
-
-/** The height of one list row in px. ReorderList moves rows in steps of this size. */
-export const ROW_HEIGHT = 56;
+// The row model behind the settings editors. Pure helpers, so the ordering rules stay out of the markup.
 
 export interface Row {
   id: string;
   label: string;
-  /** The switch state. Shown ids are the ones that are on. */
+  /** Whether the item is in the notch. Shown ids are the ones that are on. */
   on: boolean;
-  /** Whether the switch can be operated right now. */
+  /** Whether the item can be added or removed right now. */
   enabled: boolean;
-  /** Dims the row, for a control this machine cannot run. */
+  /** Dims the item, for a control this machine cannot run or a page whose feature is off. */
   dim?: boolean;
-  /** A short line under the label, such as why a control is unavailable. */
+  /** A short line saying why the item is dimmed or locked. */
   note?: string;
 }
 
@@ -24,60 +21,46 @@ export function ordered(known: string[], shown: string[]): string[] {
   ];
 }
 
-/** Moves the row with `id` to index `to`. Returns the same array when nothing would move. */
-export function moveRow(rows: Row[], id: string, to: number): Row[] {
-  const from = rows.findIndex((row) => row.id === id);
-  if (from < 0 || to < 0 || to >= rows.length || from === to) return rows;
-  const next = rows.slice();
-  const [row] = next.splice(from, 1);
-  next.splice(to, 0, row);
+/** Moves `id` to index `to` in a list of ids. Returns the same array when nothing would move. */
+export function moveId(ids: string[], id: string, to: number): string[] {
+  const from = ids.indexOf(id);
+  if (from < 0 || to < 0 || to >= ids.length || from === to) return ids;
+  const next = ids.slice();
+  next.splice(from, 1);
+  next.splice(to, 0, id);
   return next;
 }
 
-/** A row drag in progress. `from` and `to` are indexes; `dy` is the pointer travel in px. */
-export interface Drag {
-  id: string;
-  from: number;
-  to: number;
-  dy: number;
-}
-
-/** A row that was just dropped. It keeps `y` px of offset until it glides into its slot. */
-export interface Settle {
-  id: string;
-  y: number;
-}
-
 /**
- * The vertical offset in px of the row `id` at `index`. A drag wins: the dragged row follows the
- * pointer and the rows between its start and drop point step aside by one row. Otherwise only the
- * settling row is offset.
+ * The rows with `shown` on, in that order, followed by every other row switched off in its
+ * current order. Ids in `shown` that no row has are ignored.
  */
-export function rowOffset(
-  id: string,
-  index: number,
-  drag: Drag | null,
-  settle: Settle | null,
-): number {
-  if (drag) {
-    if (id === drag.id) return drag.dy;
-    if (index > drag.from && index <= drag.to) return -ROW_HEIGHT;
-    if (index < drag.from && index >= drag.to) return ROW_HEIGHT;
-    return 0;
-  }
-  return settle && id === settle.id ? settle.y : 0;
+export function arrange(rows: Row[], shown: string[]): Row[] {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const first = shown.flatMap((id) => {
+    const row = byId.get(id);
+    return row ? [{ ...row, on: true }] : [];
+  });
+  const rest = rows.filter((row) => !shown.includes(row.id)).map((row) => ({ ...row, on: false }));
+  return [...first, ...rest];
 }
 
-/**
- * The offset a dropped row keeps so it stays under the pointer in its new slot. Rows are
- * ROW_HEIGHT apart, so the offset is what the pointer travelled beyond the whole rows it moved.
- */
-export function settleOffset(dy: number, from: number, to: number): number {
-  return dy - (to - from) * ROW_HEIGHT;
+/** Adds a row to the end of the shown ones, or takes it out. */
+export function showRow(rows: Row[], id: string, on: boolean): Row[] {
+  const shown = rows.filter((row) => row.on && row.id !== id).map((row) => row.id);
+  return arrange(rows, on ? [...shown, id] : shown);
 }
 
-/** The drop slot for a pointer that moved `dy` px from row `from`, clamped to the list. */
-export function dropIndex(from: number, dy: number, length: number): number {
-  const slots = Math.round(dy / ROW_HEIGHT);
-  return Math.min(Math.max(from + slots, 0), length - 1);
+/** The index of the slot whose centre is nearest the point. -1 when there are no slots. */
+export function nearestSlot(slots: { x: number; y: number }[], px: number, py: number): number {
+  let best = -1;
+  let bestDistance = Infinity;
+  slots.forEach((slot, index) => {
+    const distance = (slot.x - px) ** 2 + (slot.y - py) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  });
+  return best;
 }

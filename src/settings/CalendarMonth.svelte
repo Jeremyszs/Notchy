@@ -4,7 +4,6 @@
   // (calendar_between), so this file only lays them out. It refreshes when the event list changes, which
   // arrives on calendar://update through the calendarEvents store.
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
   import { onMount, tick } from "svelte";
   import { SMOOTH_MS, smoothEase } from "../lib/motion";
   import { fade, fly } from "svelte/transition";
@@ -177,9 +176,16 @@
       : fly(node, { x: direction * 16, duration: SMOOTH_MS, easing: smoothEase });
   const motionOut = (node: Element) => fade(node, { duration: REDUCED ? 150 : 120 });
 
-  // The island's "Add note" opens this section on its day with the add form. A window that is already
-  // open hears the event. A window built for the request may not be listening yet, so it takes the day
-  // once when it mounts.
+  // The island's "Add note" opens this section on its day with the add form. Settings hears the request
+  // (it may arrive while another section shows, when this view is not mounted) and passes it in. Each new
+  // `seq` opens the form once.
+  export let addRequest: { day: string; seq: number } | null = null;
+  let handledSeq = 0;
+  $: if (addRequest && addRequest.seq !== handledSeq) {
+    handledSeq = addRequest.seq;
+    openAddFor(addRequest.day);
+  }
+
   const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
 
   function openAddFor(day: string): void {
@@ -190,7 +196,7 @@
     editingEvent = null;
     listError = "";
     mode = "add";
-    rootEl?.closest("section")?.scrollIntoView({ block: "start" });
+    void tick().then(() => rootEl?.scrollIntoView({ block: "start", behavior: "smooth" }));
   }
 
   onMount(() => {
@@ -198,22 +204,8 @@
       today = dateKey(new Date());
     };
     window.addEventListener("focus", refreshToday);
-    let stop: (() => void) | undefined;
-    let gone = false;
-    listen<string>("calendar://add-note", (event) => openAddFor(event.payload)).then((off) => {
-      if (gone) off();
-      else stop = off;
-    });
-    invoke<string | null>("calendar_take_add_date").then(
-      (day) => {
-        if (day) openAddFor(day);
-      },
-      () => {},
-    );
     return () => {
       window.removeEventListener("focus", refreshToday);
-      gone = true;
-      stop?.();
     };
   });
 </script>

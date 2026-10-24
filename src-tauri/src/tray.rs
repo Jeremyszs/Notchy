@@ -57,8 +57,10 @@ pub fn open_settings(app: &AppHandle) {
             WebviewUrl::App("settings.html".into()),
         )
         .title("Notchy Settings")
-        .inner_size(720.0, 560.0)
-        .min_inner_size(560.0, 420.0)
+        // Wide enough for the sidebar by default. The page reflows down to the minimum, where the
+        // sidebar turns into a row of tabs (see Settings.svelte).
+        .inner_size(900.0, 640.0)
+        .min_inner_size(400.0, 440.0)
         .center()
         .resizable(true)
         .skip_taskbar(false)

@@ -556,10 +556,57 @@ and "10 min" (11 / 20 600 in `#FF6A3D`), with 4 px between them. The title takes
 failed snooze puts its error text in the title until a new reminder arrives. With no snooze the body is the
 full 102 px again, so the grid and the page do not move when the strip appears. The strip has no motion.
 
+### Settings window (`src/settings/Settings.svelte`)
+
+**Frame.** The window opens at 900 x 640 and can shrink to 400 x 440 (`tray.rs`). A `.shell` is the size
+container, and `.app` inside it is the grid, because a container query cannot restyle the element it
+measures. Wider than 720 px: a 220 px sidebar (`#111113`) and a scrolling pane. At 720 px and below the
+sidebar becomes a row of pill tabs along the top that scrolls sideways, and the pane padding drops from
+28 / 32 px to 20 / 16 px. At 440 px and below the feature grid is one column and the section blurb hides.
+Nothing scrolls sideways at any width (checked at 355 and 900 px).
+
+**Sections.** One section shows at a time, picked in the sidebar and remembered in `localStorage`
+(`notchy.settings.section`, wrapped in try/catch). Each has a colour tile, as System Settings does:
+Features `#0A84FF`, Notch layout `#5E5CE6`, Appearance `#BF5AF2`, Timer `#FF9F0A`, Calendar `#FF6A3D`,
+Notifications `#FF453A`, Battery `#30D158`, Shelf `#6CB8FF`, Hotkeys `#8E8E93`, General `#636366`. A
+section arrives with `rise` (8 px, no blur). Its heading is a 48 px tile, a 24 / 700 title and a 13 px
+blurb at 60%.
+
+**Surfaces.** Window `#0B0B0C`. Cards `#161618` with a 0.5 px 8% white inner edge and a 14 px radius.
+Rows are at least 60 px: a 30 px colour tile, a 14 px label, an optional 12 px line at 60%, and the
+control on the right. Switches are green (`#30D158`) when on, with a white knob on the bouncy spring.
+
+**Features.** A grid of cards (`minmax(230px, 1fr)`), one per feature: a 92 px picture of the notch doing
+that thing on a glow of the feature's colour, a name, one line and the feature's main switch. A card
+whose feature has more options has an "Options" chip that opens its section. A card that is off dims its
+picture to 45%.
+
+**Notch layout.** Two editors, each a card with a "stage": the notch drawn as a black panel hanging from a
+soft screen glow, holding the items in the order the notch uses. `Strip.svelte` does the ordering: drag
+an item (it starts after 4 px, a dashed outline keeps its place, a copy follows the pointer, the others
+slide aside with `animate:flip` on the smooth spring), or focus it and use the arrow keys (focus follows
+it). Delete, Backspace or the minus badge (shown on hover and focus) removes it. Removed items wait in an
+"Add" tray below; adding puts an item at the end. Every move or change is read out in a polite live
+region. Pages: 80 x 70 chips with a page colour tile, the page name and its place in the swipe order;
+the last page cannot be removed; a page whose feature is off shows "Off". Controls: sliders (at most 2)
+in their own row above the buttons (at most 7), as on the Controls page. A control this machine cannot
+run is dimmed, and the tray says why one cannot be added. The order helpers are in `settings/rows.ts`.
+
+**Appearance.** A preview of the notch with a song title in the chosen font, then a grid of font cards
+("Aa" at 32 px in that face). The chosen card has a 2 px `#0A84FF` ring. It is a radio group; the arrow
+keys move the choice.
+
+**Timer.** Three length cards in their mode colours (focus `#FF453A`, short break `#30D158`, long break
+`#64D2FF`) with minus and plus buttons and the number (28 / 600, tabular) typed in place.
+
+**Add note from the notch.** Settings listens for `calendar://add-note` and also takes a pending day on
+load (`calendar_take_add_date`), so a request is never left to open the form later. It switches to the
+Calendar section and passes `addRequest` to `CalendarMonth`, which opens the form once per `seq`.
+
 ### Calendar month (Settings)
 `CalendarMonth.svelte` is the Calendar section of Settings. A month grid sits in a card above a panel for the selected day. The card's side padding is the group padding (16 px), so the grid lines up with the rows of the groups above and below.
 
-Measured in the browser harness at a 560 px window (the Settings minimum). The card is 512 px wide, and the grid is inset 16 px on each side.
+Measured in the browser harness at a 560 px window (before the Settings minimum dropped to 400 px). The card is 512 px wide, and the grid is inset 16 px on each side.
 
 - **Header.** A 32 px bar in a `1fr auto 1fr` grid. The middle is two 32 px arrows around a 160 px title box, so the title is centred between them (measured within 0.01 px of the arrows' midpoint) and nothing moves when the month name changes width. "Today" sits at the right end.
 - **Weekdays.** A 24 px row, 8 px under the bar. Labels start on the first day of the week for the PC's language (`Intl.Locale.getWeekInfo`, Monday when unknown): Sunday in en-US, Monday in en-GB.

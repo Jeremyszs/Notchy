@@ -47,12 +47,12 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: #fff;
+    background: #30d158;
     opacity: 0;
     transition: opacity 200ms ease;
   }
 
-  /* The knob is white, and it turns black over the white track when on. */
+  /* The knob stays white; the track fades to green when on, as on iOS. */
   .knob {
     position: absolute;
     top: 2px;
@@ -65,16 +65,6 @@
     transition: transform var(--spring-bouncy-ms) var(--spring-bouncy);
   }
 
-  .knob::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: #000;
-    opacity: 0;
-    transition: opacity 200ms ease;
-  }
-
   .switch[aria-checked="true"] .fill {
     opacity: 1;
   }
@@ -83,14 +73,9 @@
     transform: translateX(20px);
   }
 
-  .switch[aria-checked="true"] .knob::after {
-    opacity: 1;
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .fill,
-    .knob,
-    .knob::after {
+    .knob {
       transition: none;
     }
   }
