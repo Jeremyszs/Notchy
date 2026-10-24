@@ -16,6 +16,7 @@ pub mod lyrics;
 pub mod media;
 pub mod notifications;
 pub mod stats;
+pub mod shelf;
 pub mod timer;
 
 use tauri::{AppHandle, Manager};
@@ -40,7 +41,7 @@ pub fn start_all(app: &AppHandle) {
         app: app.clone(),
         island: app.state::<SharedIsland>().inner().clone(),
     };
-    let modules: [&dyn Module; 10] = [
+    let modules: [&dyn Module; 11] = [
         &media::MediaModule,
         &lyrics::LyricsModule,
         &context::ContextModule,
@@ -50,6 +51,7 @@ pub fn start_all(app: &AppHandle) {
         &calendar::CalendarModule,
         &timer::TimerModule,
         &stats::StatsModule,
+        &shelf::ShelfModule,
         &hotkeys::HotkeysModule,
     ];
     for module in modules {

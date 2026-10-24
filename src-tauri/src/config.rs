@@ -27,7 +27,7 @@ use crate::modules::notifications;
 const FILE_NAME: &str = "config.json";
 const UPDATE_EVENT: &str = "config://update";
 /// Page ids the notch knows how to show, in their default order.
-pub const PAGES: [&str; 5] = ["media", "controls", "timer", "stats", "calendar"];
+pub const PAGES: [&str; 6] = ["media", "controls", "timer", "stats", "calendar", "shelf"];
 /// Pomodoro lengths in whole minutes: the bounds the settings and the file are held to.
 pub const FOCUS_MINUTES: (u32, u32, u32) = (25, 1, 120);
 pub const SHORT_BREAK_MINUTES: (u32, u32, u32) = (5, 1, 60);
@@ -90,6 +90,18 @@ pub struct Config {
     /// Calendar reminders and the Calendar page.
     pub calendar: Calendar,
     pub hotkeys: Hotkeys,
+    pub shelf: ShelfSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShelfSettings {
+    pub clipboard: bool,
+    pub files: bool,
+}
+
+impl Default for ShelfSettings {
+    fn default() -> Self { Self { clipboard: false, files: true } }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,6 +307,7 @@ impl Default for Config {
             stats: Stats::default(),
             calendar: Calendar::default(),
             hotkeys: Hotkeys::default(),
+            shelf: ShelfSettings::default(),
         }
     }
 }
@@ -594,6 +607,9 @@ pub async fn config_set(app: AppHandle, config: Config) -> Result<Config, String
     if previous.calendar != next.calendar {
         calendar::reapply(&app);
     }
+    if previous.shelf != next.shelf {
+        crate::modules::shelf::reapply(&app);
+    }
     let _ = app.emit(UPDATE_EVENT, &next);
     autostart.map(|()| next)
 }
@@ -601,6 +617,25 @@ pub async fn config_set(app: AppHandle, config: Config) -> Result<Config, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shelf_defaults_old_file_and_partial_settings_sanitize() {
+        let defaults = Config::default();
+        assert!(!defaults.shelf.clipboard);
+        assert!(defaults.shelf.files);
+        assert_eq!(defaults.pages.last().unwrap(), "shelf");
+        let old: Config = serde_json::from_str(r#"{"pages":["media","calendar"]}"#).unwrap();
+        let old = old.sanitize();
+        assert_eq!(old.shelf, ShelfSettings::default());
+        assert!(!old.pages.iter().any(|page| page == "shelf"));
+        let partial: Config = serde_json::from_str(r#"{"shelf":{"clipboard":true},"pages":["shelf","shelf","unknown"]}"#).unwrap();
+        let partial = partial.sanitize();
+        assert!(partial.shelf.clipboard && partial.shelf.files);
+        assert_eq!(partial.pages, ids(&["shelf"]));
+        assert_eq!(partial.clone().sanitize(), partial);
+        let off: Config = serde_json::from_str(r#"{"shelf":{"clipboard":false,"files":false}}"#).unwrap();
+        assert!(!off.sanitize().shelf.files);
+    }
 
     fn ids(list: &[&str]) -> Vec<String> {
         list.iter().map(|id| id.to_string()).collect()
@@ -636,7 +671,7 @@ mod tests {
         };
         assert_eq!(
             none_known.sanitize().pages,
-            ids(&["media", "controls", "timer", "stats", "calendar"])
+            ids(&["media", "controls", "timer", "stats", "calendar", "shelf"])
         );
 
         let one = Config {
@@ -755,7 +790,7 @@ mod tests {
             })
         );
         assert!(json.contains("\"launchAtLogin\":false"));
-        assert!(json.contains("\"pages\":[\"media\",\"controls\",\"timer\",\"stats\",\"calendar\"]"));
+        assert!(json.contains("\"pages\":[\"media\",\"controls\",\"timer\",\"stats\",\"calendar\",\"shelf\"]"));
         assert!(json.contains("\"stats\":{\"enabled\":true}"));
         assert!(
             json.contains("\"calendar\":{\"enabled\":true,\"leadMinutes\":10,\"allDayHour\":9}")
@@ -1087,7 +1122,7 @@ mod tests {
         let config = load(&path);
         assert_eq!(
             config.pages,
-            ids(&["media", "controls", "timer", "stats", "calendar"])
+            ids(&["media", "controls", "timer", "stats", "calendar", "shelf"])
         );
         assert_eq!(config.controls, ids(&["wifi"]));
         fs::remove_dir_all(&dir).unwrap();

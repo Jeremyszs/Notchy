@@ -104,6 +104,7 @@ pub enum ActivityKind {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Inputs {
     pub hovered: bool,
+    pub file_drag: bool,
     pub media_playing: bool,
     pub fullscreen: bool,
     pub covered: bool,
@@ -140,6 +141,8 @@ pub fn resolve(inputs: Inputs) -> IslandState {
         IslandState::Hidden
     } else if inputs.alert {
         IslandState::Alert
+    } else if inputs.file_drag {
+        IslandState::Expanded
     } else if inputs.hovered && inputs.wide {
         IslandState::Lyrics
     } else if inputs.hovered {
@@ -166,6 +169,7 @@ pub fn resolve(inputs: Inputs) -> IslandState {
 #[derive(Debug, Default)]
 pub struct IslandStateMachine {
     hovered: bool,
+    file_drag: bool,
     media_playing: bool,
     fullscreen: bool,
     covered: bool,
@@ -182,6 +186,7 @@ impl IslandStateMachine {
     pub fn current(&self) -> IslandState {
         resolve(Inputs {
             hovered: self.hovered,
+            file_drag: self.file_drag,
             media_playing: self.media_playing,
             fullscreen: self.fullscreen,
             covered: self.covered,
@@ -193,6 +198,14 @@ impl IslandStateMachine {
             activity: self.activity.is_some(),
             alert: self.alert.is_some(),
         })
+    }
+
+    pub fn set_file_drag(&mut self, active: bool) {
+        self.file_drag = active;
+    }
+
+    pub fn file_drag_active(&self) -> bool {
+        self.file_drag
     }
 
     pub fn set_hovered(&mut self, hovered: bool) {
@@ -291,6 +304,25 @@ pub fn island_set_lyrics_size(w: f64, h: f64) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn file_drag_expands_without_hover_and_yields_to_fullscreen_and_alert() {
+        let mut machine = IslandStateMachine::default();
+        machine.set_covered(true);
+        machine.set_wide(true);
+        machine.set_file_drag(true);
+        assert_eq!(machine.current(), IslandState::Expanded);
+        machine.set_alert(Some(ActivityKind::Timer));
+        assert_eq!(machine.current(), IslandState::Alert);
+        machine.set_fullscreen(true);
+        assert_eq!(machine.current(), IslandState::Hidden);
+        machine.set_fullscreen(false);
+        machine.set_alert(None);
+        machine.set_file_drag(false);
+        assert_eq!(machine.current(), IslandState::Tucked);
+        machine.set_hovered(true);
+        assert_eq!(machine.current(), IslandState::Lyrics);
+    }
+
     /// Each precedence rung as the inputs that trigger it on their own, and the state it gives.
     /// Listed highest first, the same order as `resolve`.
     fn rungs() -> [(Inputs, IslandState); 11] {
@@ -317,6 +349,7 @@ mod tests {
     fn union(a: Inputs, b: Inputs) -> Inputs {
         Inputs {
             hovered: a.hovered || b.hovered,
+            file_drag: a.file_drag || b.file_drag,
             media_playing: a.media_playing || b.media_playing,
             fullscreen: a.fullscreen || b.fullscreen,
             covered: a.covered || b.covered,

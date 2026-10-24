@@ -79,6 +79,15 @@ fn main() {
             modules::timer::timer_lap,
             modules::timer::timer_dismiss,
             modules::stats::stats_set_active,
+            modules::shelf::shelf_list,
+            modules::shelf::shelf_copy,
+            modules::shelf::shelf_pin,
+            modules::shelf::shelf_remove,
+            modules::shelf::shelf_clear,
+            modules::shelf::shelf_add_files,
+            modules::shelf::shelf_open,
+            modules::shelf::shelf_reveal,
+            modules::shelf::shelf_drag_active,
             config::config_get,
             config::config_set,
         ])
@@ -87,6 +96,7 @@ fn main() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 modules::hotkeys::shutdown(app);
+                modules::shelf::shutdown(app);
             }
         });
 }

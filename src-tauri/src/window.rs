@@ -15,6 +15,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::state::{self, IslandState, SharedIsland};
+use crate::config::{self, SharedConfig};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 
 // Must match the window size in tauri.conf.json.
 const WINDOW_WIDTH: f64 = 720.0;
@@ -135,6 +137,7 @@ fn spawn_cursor_watch(app: AppHandle, window: WebviewWindow, hwnd: HWND, island:
     thread::spawn(move || {
         let hwnd = HWND(hwnd_raw as *mut c_void);
         let mut inside = false;
+        let mut interactive = false;
         let mut tucked = TuckedGate::default();
         let mut interval = POLL_INTERVAL;
 
@@ -148,7 +151,10 @@ fn spawn_cursor_watch(app: AppHandle, window: WebviewWindow, hwnd: HWND, island:
                 continue;
             };
             let scale = dpi_scale(hwnd);
-            let state = state::lock(&island).current();
+            let (state, dragging) = {
+                let machine = state::lock(&island);
+                (machine.current(), machine.file_drag_active())
+            };
             interval = if state == IslandState::Hidden {
                 HIDDEN_POLL_INTERVAL
             } else {
@@ -157,22 +163,44 @@ fn spawn_cursor_watch(app: AppHandle, window: WebviewWindow, hwnd: HWND, island:
 
             let on_pill =
                 hit_box(state).is_some_and(|size| pill_contains(rect, scale, size, cursor));
-            let hit = if state == IslandState::Tucked {
+            let held = unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0;
+            let files = config::lock(app.state::<SharedConfig>().inner()).shelf.files;
+            let armed = drag_armed(state, files, held, rect, scale, cursor);
+            if dragging && !armed {
+                state::commit(&app, &island, |machine| machine.set_file_drag(false));
+                let _ = app.emit("shelf://drag", false);
+            }
+            // Holding a button only arms hit-testing; a confirmed file enter expands.
+            let hit = if held {
+                tucked.reset();
+                inside && on_pill
+            } else if state == IslandState::Tucked {
                 tucked.admit(on_pill, Instant::now())
             } else {
                 tucked.reset();
                 on_pill
             };
+            let takes_cursor = armed || hit;
+            if takes_cursor != interactive {
+                interactive = takes_cursor;
+                let _ = window.set_ignore_cursor_events(!interactive);
+            }
             if hit == inside {
                 continue;
             }
             inside = hit;
 
-            let _ = window.set_ignore_cursor_events(!hit);
             let _ = app.emit("island://hover", hit);
             state::commit(&app, &island, |machine| machine.set_hovered(hit));
         }
     });
+}
+
+fn drag_armed(state: IslandState, files: bool, held: bool, rect: RECT, scale: f64, cursor: POINT) -> bool {
+    if !files || !held || state == IslandState::Hidden { return false; }
+    let (w, h) = state.pill_size();
+    // pill_contains already adds HIT_MARGIN.
+    pill_contains(rect, scale, (w + 36.0, h + 18.0), cursor)
 }
 
 /// Logical size of the hit area for a state, or None when the island takes no hover.
@@ -245,6 +273,18 @@ fn dpi_scale(hwnd: HWND) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drag_arming_needs_button_files_visible_and_dpi_scaled_zone() {
+        let rect = RECT { left: 0, top: 0, right: 1000, bottom: 480 };
+        let at = |x, y| POINT { x, y };
+        assert!(drag_armed(IslandState::Idle, true, true, rect, 2.0, at(668, 108)));
+        assert!(!drag_armed(IslandState::Idle, true, true, rect, 2.0, at(669, 108)));
+        assert!(!drag_armed(IslandState::Idle, true, true, rect, 2.0, at(500, 109)));
+        assert!(!drag_armed(IslandState::Hidden, true, true, rect, 2.0, at(500, 0)));
+        assert!(!drag_armed(IslandState::Idle, false, true, rect, 2.0, at(500, 0)));
+        assert!(!drag_armed(IslandState::Idle, true, false, rect, 2.0, at(500, 0)));
+    }
 
     #[test]
     fn hidden_takes_no_hover() {

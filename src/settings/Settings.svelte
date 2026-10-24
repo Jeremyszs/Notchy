@@ -52,6 +52,8 @@
   let batteryCharge = DEFAULT_CONFIG.battery.chargeAlerts;
   let batteryLow = DEFAULT_CONFIG.battery.lowBatteryAlerts;
   let statsOn = DEFAULT_CONFIG.stats.enabled;
+  let shelfClipboard = DEFAULT_CONFIG.shelf.clipboard;
+  let shelfFiles = DEFAULT_CONFIG.shelf.files;
   let calendarOn = DEFAULT_CONFIG.calendar.enabled;
   let calendarLead = DEFAULT_CONFIG.calendar.leadMinutes;
   let calendarHour = DEFAULT_CONFIG.calendar.allDayHour;
@@ -67,7 +69,7 @@
   $: info = new Map(controls.map((control) => [control.id, control]));
   // Rows as the switches see them: a switch that cannot turn on stays off, and a control
   // this machine cannot run shows why.
-  $: pageView = pageLimits(pageRows, statsOn);
+  $: pageView = pageLimits(pageRows, statsOn, shelfClipboard || shelfFiles);
   $: controlView = controlLimits(controlRows, info);
 
   function buildRows(known: string[], shown: string[], label: (id: string) => string): Row[] {
@@ -80,15 +82,15 @@
   }
 
   // At least one page stays on. The Stats page also needs its own switch on, so its row says so.
-  function pageLimits(rows: Row[], stats: boolean): Row[] {
+  function pageLimits(rows: Row[], stats: boolean, shelf: boolean): Row[] {
     const onCount = rows.filter((row) => row.on).length;
     return rows.map((row) => {
-      const off = row.id === "stats" && !stats;
+      const off = (row.id === "stats" && !stats) || (row.id === "shelf" && !shelf);
       return {
         ...row,
         enabled: !row.on || onCount > 1,
         dim: off,
-        note: off ? "Off in Stats below" : undefined,
+        note: off ? `Off in ${row.id === "shelf" ? "Shelf" : "Stats"} below` : undefined,
       };
     });
   }
@@ -151,6 +153,7 @@
       notifications: { enabled: notifyOn, deniedApps },
       battery: { enabled: batteryOn, chargeAlerts: batteryCharge, lowBatteryAlerts: batteryLow },
       stats: { enabled: statsOn },
+      shelf: { clipboard: shelfClipboard, files: shelfFiles },
       calendar: { enabled: calendarOn, leadMinutes: calendarLead, allDayHour: calendarHour },
       hotkeys,
     };
@@ -240,6 +243,8 @@
     batteryCharge = settings.battery.chargeAlerts;
     batteryLow = settings.battery.lowBatteryAlerts;
     statsOn = settings.stats.enabled;
+    shelfClipboard = settings.shelf.clipboard;
+    shelfFiles = settings.shelf.files;
     calendarOn = settings.calendar.enabled;
     calendarLead = settings.calendar.leadMinutes;
     calendarHour = settings.calendar.allDayHour;
@@ -507,6 +512,21 @@
         </li>
       </ul>
       <p class="note">The CPU, memory, network and disk are read only while the Stats page is open.</p>
+    </section>
+
+    <section aria-labelledby="shelf-title">
+      <h2 id="shelf-title">Shelf</h2>
+      <div class="group">
+        <div class="row">
+          <span class="text"><span class="label">Remember copied text</span></span>
+          <Switch checked={shelfClipboard} label="Remember copied text" onchange={(on) => { shelfClipboard = on; scheduleSave(); }} />
+        </div>
+        <div class="row">
+          <span class="text"><span class="label">Accept dropped files</span></span>
+          <Switch checked={shelfFiles} label="Accept dropped files" onchange={(on) => { shelfFiles = on; scheduleSave(); }} />
+        </div>
+      </div>
+      <p class="note">Copied text is kept in memory only and cleared when Notchy quits. Text copied from password managers is skipped.</p>
     </section>
 
     <section aria-labelledby="calendar-title">

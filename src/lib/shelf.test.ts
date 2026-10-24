@@ -1,0 +1,25 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { relativeAge, fileName, extension, wheelRoute } from "./shelf.ts";
+
+test("relative ages use whole minutes, hours and days, with future times held at now", () => {
+  for (const [ms, label] of [[0, "now"], [59_999, "now"], [120_000, "2m"], [3_600_000, "1h"], [259_200_000, "3d"]] as const) {
+    assert.equal(relativeAge(0, ms), label);
+  }
+  assert.equal(relativeAge(10, 0), "now");
+});
+test("path names and extension badges handle UNC, folders, shortcuts and long names", () => {
+  assert.equal(fileName("C:\\folder\\a file.lnk"), "a file.lnk");
+  assert.equal(fileName("\\\\server\\share\\folder\\"), "folder");
+  assert.equal(extension("archive.tar.gz"), "gz");
+  assert.equal(extension(".hidden"), "");
+  assert.equal(extension("folder.with.dot", true), "");
+  assert.equal(extension("file."), "");
+  assert.equal(fileName("C:\\" + "a".repeat(300)), "a".repeat(300));
+});
+test("strip wheels are always consumed; outside wheels belong to pages", () => {
+  assert.deepEqual(wheelRoute(true, 1, 20), { consumed: true, delta: 20 });
+  assert.deepEqual(wheelRoute(true, -30, 20), { consumed: true, delta: -30 });
+  assert.deepEqual(wheelRoute(true, 0, 0), { consumed: true, delta: 0 });
+  assert.deepEqual(wheelRoute(false, 0, 100), { consumed: false, delta: 0 });
+});

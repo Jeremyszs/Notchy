@@ -114,6 +114,7 @@ Measured in the shipped build (gap above / gap below the content block, px):
 | Timer, pomodoro (focus, break, paused, done) | 9 | 9 | 98 |
 | Wi-Fi and Bluetooth sub-views | header on top edge, footer on bottom edge | | 146 |
 | Calendar (month grid and notes) | 3 | 3 | 140 |
+| Shelf (header and card strip) | 13 | 13 | 120 |
 
 The Media content height is 72 + 8 + 16 + 8 + 40 = 144 px, leaving 1 px above and below in the 146 px page box.
 
@@ -360,7 +361,8 @@ Rules:
   `transform` or `opacity`. The timer's `.digits` is a fixed 40 px so a mode change never moves the rows
   below.
 - **Scroll is not animated.** Lists scroll natively, and the wheel is kept inside the list until it
-  reaches an end (`keepWheel` in `NetworkList.svelte`).
+  reaches an end (`keepWheel` in `NetworkList.svelte`). The Shelf strip always consumes the wheel,
+  even at an end or with no overflow; outside it, the wheel still turns pages.
 - **Per-second updates are the only steady motion.** The timer ring and the digits update once a
   second, and the stopwatch reading updates once per frame while it runs. The idle clock updates once a
   minute.
@@ -530,6 +532,42 @@ Measured in the browser harness at a 560 px window (the Settings minimum). The c
 
 Measured in the harness: 0 notes (2 October), 1 note (6 October), 4 notes (23 October, one of them the daily standup), the 240 px frame in every month opened (June, July, September, October 2026, February 2026 and February 2028), and February 2028 with its 29th coloured by the leap-day series and the clamped monthly rent. The narrow browser pane (355 px) is not a Settings size: there the add form's repeat select cuts "Does not repeat" short.
 
+### Shelf page
+
+`ShelfPage.svelte` fills the 348 x 146 page box. Its centred block is a 16 px header, 8 px gap and
+96 px strip: 120 px in all, leaving (146 - 120) / 2 = 13 px above and below. The browser harness
+measured exactly these sizes at rest, including the 88 x 96 cards and 8 px gaps. Three cards and
+their gaps leave a 60 px peek of the next card. No scrollbar is visible.
+
+The header label is Shelf, 11 px at 60% white, with the count and Clear on the right. Cards have
+12 px radii and 8% white fill, four-line 11 / 14 text previews, or a generic SVG file glyph and a
+two-line file name with an extension badge. Ages read now, 2m, 1h or 3d. Missing files have 45%
+opacity and Missing instead of an age. Pinned items carry a small pin mark and precede other items;
+each group is newest first. The empty message is centred in the strip on one line.
+
+The card's main action and its sibling pin, remove and Show in Explorer actions are real buttons,
+with native Enter/Space activation and a 2 px 70% white focus ring. Hover or focus within reveals
+the small action buttons; none are nested inside another button. Copied overlays last 900 ms and
+fade with opacity only over 150 ms; reduced motion changes opacity instantly. A file drag gives
+the strip a dashed 1.5 px 60% white outline and changes the header to Drop to shelf. Drop changes
+the header to N added for 1.2 s; leave, a closed panel, a disabled file switch or fullscreen clears
+the highlight. An incoming drag can show Shelf for that opening even when an old config has the
+page off; it does not save a page-setting change.
+
+**Scroll rule:** every wheel over the strip maps the dominant axis to scrollLeft and calls both
+preventDefault and stopPropagation, even at either end, with no overflow, or when empty. Scrolls
+are instant. Elsewhere, the existing page wheel classifier applies. A pointer swipe beginning on
+the strip is excluded from page swipes. Pager buttons and their native keyboard activation still
+change pages.
+
+The headless browser harness checked at-rest geometry, wheel consumption including empty/end
+cases, page turning outside the strip, swipe exclusion, focused actions, the copy overlay timeout,
+and mocked file enter/drop/close with no runtime errors. The real Tauri window was not tested:
+clipboard listener opt-outs and contention, copy-back without focus theft, Explorer drag delivery
+through click-through/no-activate/tool-window styles, DPI changes, fullscreen drag cancellation,
+real file open/reveal (including shortcuts, UNC and very long paths), and native keyboard focus
+remain unverified. Reduced-motion CSS was inspected but not exercised in that harness.
+
 ### Pager
 Row 16 px tall, 4 px gaps. Each dot is a 16 px hit area with a 5 px white dot at 35% opacity (100%
 when current). The row is centred, with 8 px under it.
@@ -600,7 +638,7 @@ has a row in `src/settings/Settings.svelte`.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| `pages` | media, controls, timer, stats | Panel pages and their order. One page hides the pager. Old files without `stats` keep the page off until it is turned on. |
+| `pages` | media, controls, timer, stats, calendar, shelf | Panel pages and their order. One page hides the pager. Old lists without stats, calendar or shelf keep those pages off until switched on. |
 | `controls` | eight ids | Quick controls and their order (sliders first, at most seven tiles). |
 | `lyrics` | on | Synced lyrics layout. |
 | `confirmLock` | on | First tap arms Lock for 3 s. |
@@ -610,6 +648,7 @@ has a row in `src/settings/Settings.svelte`.
 | `idleClock` | on | Shows HH:MM, dim, in the idle pill. |
 | `battery` (`enabled`, `chargeAlerts`, `lowBatteryAlerts`) | on, on, on | Shows the battery pill for the charger, full charge and low-battery warnings. Settings > Battery. A PC with no battery shows nothing. |
 | `stats` (`enabled`) | on | Lets the Stats page show and be sampled. Settings > Stats. Off, the page is hidden and nothing is read. |
+| `shelf` (`clipboard`, `files`) | off, on | Memory-only copied text and file paths. Both off hides the page. Settings > Shelf has Remember copied text and Accept dropped files, with the privacy note; its Notch pages row says Off in Shelf below when both are off. Turning clipboard off clears text only, including pinned text. |
 | `focusMinutes`, `shortBreakMinutes`, `longBreakMinutes` | 25, 5, 15 | Pomodoro lengths. |
 | `hotkeys` (`enabled`, `playPause`, `nextTrack`, `previousTrack`, `timerToggle`) | off; Ctrl+Alt+Space, Ctrl+Alt+Right, Ctrl+Alt+Left, Ctrl+Alt+T | Global keys for play or pause, next, previous and the timer. Settings > Hotkeys. Nothing is registered while off, and an empty box leaves its action unbound. A conflict is shown under the action. |
 | `calendar` (`enabled`, `leadMinutes`, `allDayHour`) | on, 10, 9 | Reminders for the user's own events, and the Calendar page. Settings > Calendar sets the lead time (5, 10, 15, 30 or 60 min) and the hour all-day events are announced at. Events themselves are in `events.json`. Settings is the only place to change them: the island's Calendar page opens it for "Add note". |

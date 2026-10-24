@@ -22,6 +22,7 @@ export interface Config {
   stats: StatsSettings;
   calendar: CalendarSettings;
   hotkeys: HotkeySettings;
+  shelf: { clipboard: boolean; files: boolean };
 }
 
 // Mirrors Hotkeys in config.rs. An empty accelerator leaves that action unbound.
@@ -61,7 +62,7 @@ export interface NotificationSettings {
 
 // The backend defaults. The notch uses them until the first answer arrives.
 export const DEFAULT_CONFIG: Config = {
-  pages: ["media", "controls", "timer", "stats", "calendar"],
+  pages: ["media", "controls", "timer", "stats", "calendar", "shelf"],
   controls: [
     "volume",
     "brightness",
@@ -85,6 +86,7 @@ export const DEFAULT_CONFIG: Config = {
   notifications: { enabled: true, deniedApps: [] },
   battery: { enabled: true, chargeAlerts: true, lowBatteryAlerts: true },
   stats: { enabled: true },
+  shelf: { clipboard: false, files: true },
   calendar: { enabled: true, leadMinutes: 10, allDayHour: 9 },
   hotkeys: {
     enabled: false,

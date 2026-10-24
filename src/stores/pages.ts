@@ -2,7 +2,7 @@ import { derived, get, writable } from "svelte/store";
 import { mediaState } from "./media";
 import { config } from "./config";
 
-export type Page = "media" | "controls" | "timer" | "stats" | "calendar";
+export type Page = "media" | "controls" | "timer" | "stats" | "calendar" | "shelf";
 
 export const PAGE_LABELS: Record<Page, string> = {
   media: "Media",
@@ -10,6 +10,7 @@ export const PAGE_LABELS: Record<Page, string> = {
   timer: "Timer",
   stats: "Stats",
   calendar: "Calendar",
+  shelf: "Shelf",
 };
 
 // A page the user left this recently is the one they get back when the panel reopens.
@@ -34,11 +35,15 @@ function isPage(id: string): id is Page {
 
 // Pages the pager cycles through, in order, from the settings. With one page enabled, the pager
 // is hidden. The Stats and Calendar pages also need their own switches on.
-export const enabledPages = derived(config, ($config) =>
-  $config.pages
+const dropPage = writable(false);
+export function showShelfDrop() { dropPage.set(true); page.set("shelf"); }
+
+export const enabledPages = derived([config, dropPage], ([$config, dropping]) =>
+  (dropping && !$config.pages.includes("shelf") ? [...$config.pages, "shelf"] : $config.pages)
     .filter(isPage)
     .filter((id) => id !== "stats" || $config.stats.enabled)
-    .filter((id) => id !== "calendar" || $config.calendar.enabled),
+    .filter((id) => id !== "calendar" || $config.calendar.enabled)
+    .filter((id) => id !== "shelf" || $config.shelf.clipboard || $config.shelf.files),
 );
 
 export const page = writable<Page>("media");
@@ -56,6 +61,7 @@ export function enterPanel(): void {
 
 /** Called when the panel closes. Remembers the page so a quick reopen keeps it. */
 export function leavePanel(): void {
+  dropPage.set(false);
   lastPage = get(page);
   leftAt = Date.now();
 }
