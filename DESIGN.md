@@ -114,7 +114,7 @@ Measured in the shipped build (gap above / gap below the content block, px):
 | Timer, pomodoro (focus, break, paused, done) | 9 | 9 | 98 |
 | Wi-Fi and Bluetooth sub-views | header on top edge, footer on bottom edge | | 146 |
 | Calendar (month grid and notes) | 3 | 3 | 140 |
-| Shelf (header and card strip) | 13 | 13 | 120 |
+| Shelf (20 px header, 8 px gap, 104 px card strip) | 7 | 7 | 132 |
 
 The Media content height is 72 + 8 + 16 + 8 + 40 = 144 px, leaving 1 px above and below in the 146 px page box.
 
@@ -262,6 +262,9 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | 11 / 14 | 400 | Media progress times, elapsed and length (tabular, 60% white) |
 | 12 / 24 | 500 | Calendar page snooze title (90% white), one line with an ellipsis |
 | 11 / 20 | 600 | Calendar page snooze buttons, "5 min" and "10 min" (accent text) |
+| 12 / 16 | 600 | Shelf header label, and the empty card's title (90% white) |
+| 11 / 14 | 600 | Shelf count pill, Clear (60% white, Clear at 35% when disabled), a file name (90% white, 2-line clamp) |
+| 11 / 14 | 400 | Shelf card text (90% white, 3-line clamp), card age and extension (60% white), empty card's second line (60% white) |
 
 - **Tabular numbers.** Every number that changes while shown uses `font-variant-numeric: tabular-nums`
   (digits, activity clock, HUD value, idle clock, stepper value). `RollingClock` lays each digit in a
@@ -310,6 +313,8 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Island calendar page, snooze buttons | `#FF6A3D` | | link text (7.4:1 on `#000`), with a 14% accent fill on hover |
 | Media progress bar | `#FFFFFF` | | the fill, on a track at 16% white. No accent: the artwork is the colour |
 | Settings form, chips on | `#FFFFFF` | | a toggle that is on: white with a black label, as the switches are |
+| Shelf accent (chip, hairline, count pill, drop outline and sheen, Copied flash, pin mark) | `#8CCBFF` | `#6CB8FF`, `#5AAEF7` | One soft sky blue, in three tints for the moving sheen. No other hue on the Shelf. The pin is a stroke in the accent. Never behind text |
+| Shelf card tint (text and file cards alike) | `#6CB8FF` at 10% | | over the 8% white card, so kind is told by the glyph only. Text stays 90% white (about 12:1 on the tinted card, computed) |
 
 - **Accent use.** An accent fills a ring, a strong pill, a filled pomodoro session, or the glow. It is
   never used for body text. A filled session dot is the accent at 100%, an empty one is the accent at
@@ -354,6 +359,11 @@ Times and curves used in code. Keep them unless you have measured a reason.
 | Settings month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | `cubic-bezier(0.22, 1, 0.36, 1)` | transform and opacity. Reduced motion: a 150 ms fade, no slide |
 | Island calendar month slide | 220 ms, the new month slides 16 px; the old one fades 120 ms | cubic-out (Svelte `fly`) | transform and opacity. Reduced motion: a 150 ms fade, no slide |
 | Media progress fill | 250 ms, linear, one step per tick (the clock ticks 4 times a second while it runs) | linear | transform scaleX. A drag has no transition, and reduced motion jumps |
+| Shelf sheen (header hairline; empty card 14 s) | 12 s loop | linear, infinite | transform translateX over a 300% gradient layer, one gradient cycle per loop |
+| Shelf drop highlight sheen | 3.5 s loop | linear, infinite | transform, as above; the outline's opacity pulses 0.75 to 1 over 3.5 s |
+| Shelf card arrives | 220 ms | `cubic-bezier(0.2, 0.8, 0.2, 1)` | opacity and transform translateY 6 px to 0 |
+| Shelf card leaves, drop highlight in and out, Copied flash, action pill | 150 ms | ease | opacity only |
+| Shelf card hover lift | instant | | transform translateY -1 px (none under reduced motion) |
 
 Rules:
 
@@ -534,25 +544,42 @@ Measured in the harness: 0 notes (2 October), 1 note (6 October), 4 notes (23 Oc
 
 ### Shelf page
 
-`ShelfPage.svelte` fills the 348 x 146 page box. Its centred block is a 16 px header, 8 px gap and
-96 px strip: 120 px in all, leaving (146 - 120) / 2 = 13 px above and below. The browser harness
-measured exactly these sizes at rest, including the 88 x 96 cards and 8 px gaps. Three cards and
-their gaps leave a 60 px peek of the next card. No scrollbar is visible.
+`ShelfPage.svelte` fills the 348 x 146 page box with a centred block: a 20 px header, an 8 px gap and a
+104 px strip. The strip holds 96 x 104 cards with 8 px gaps. The block is 132 px, so 7 px sits above and
+below it. Measured in the browser harness (`getBoundingClientRect`, page top at y 24): the header starts
+7 px below the page top, the strip ends 7 px above the bottom, and the fourth card starts at x 312, so
+the next card peeks 36 px at the right edge. No scrollbar is visible. The strip stays the scroller
+(`.shelf-strip`), which `swipeStart` in `Island.svelte` excludes.
 
-The header label is Shelf, 11 px at 60% white, with the count and Clear on the right. Cards have
-12 px radii and 8% white fill, four-line 11 / 14 text previews, or a generic SVG file glyph and a
-two-line file name with an extension badge. Ages read now, 2m, 1h or 3d. Missing files have 45%
-opacity and Missing instead of an age. Pinned items carry a small pin mark and precede other items;
-each group is newest first. The empty message is centred in the strip on one line.
+**Header**, left to right: a 20 px chip in the accent blue with a tray glyph, the label "Shelf"
+(12 / 16, 600), the count pill (a 16 px pill at 12% white, 11 px, 60%), and the Clear button. Clear is a
+ghost button at 60% white. It is disabled at 35% opacity when nothing unpinned is left. A 1 px hairline
+at 45% in the accent blue runs under the header, in the 8 px gap. While a file drag is over the notch the
+label reads "Drop to shelf". After a drop it reads "N added" for 1.2 s.
 
-The card's main action and its sibling pin, remove and Show in Explorer actions are real buttons,
-with native Enter/Space activation and a 2 px 70% white focus ring. Hover or focus within reveals
-the small action buttons; none are nested inside another button. Copied overlays last 900 ms and
-fade with opacity only over 150 ms; reduced motion changes opacity instantly. A file drag gives
-the strip a dashed 1.5 px 60% white outline and changes the header to Drop to shelf. Drop changes
-the header to N added for 1.2 s; leave, a closed panel, a disabled file switch or fullscreen clears
-the highlight. An incoming drag can show Shelf for that opening even when an old config has the
-page off; it does not save a page-setting change.
+**Cards.** Each has a 12 px radius. Text and file cards share one light-blue tint (10%) over the 8% white,
+with a 1 px inner highlight, and kind is shown by the glyph alone. The top row holds a kind glyph at the top left (lines for text, a
+document for a file) and, when pinned, an SVG pin stroked in the accent blue at the top right. The
+body is a 3-line text preview, or a 2-line file name, and it starts below the top row, so it never runs
+under the pin. The footer holds the age (now, 2m, 1h, 3d) at 60% white and, for a file, the extension.
+A missing file is at 45% opacity and shows "Missing" in place of the age. Pinned items come first, then
+the newest.
+
+**Hover and focus.** A card lifts 1 px. The footer fades, and a dark glass pill appears at the bottom
+centre with Pin or Unpin, Show in Explorer (files only) and Remove. Each is a real button with a label
+and a 2 px 70% white focus ring. The pill is a separate element, never nested in the card's button.
+
+**Empty state.** The strip area becomes a dashed 1.5 px card (28% white, 14 px radius) with the accent
+sheen behind it. It holds a tray glyph, "Drop files or copy text" (12 / 16, 600) and a 11 / 14 second
+line at 60% white. The second line is "Clipboard history is off, turn it on in Settings" when the
+clipboard is off and files are on. Otherwise it is "Copied text stays in memory".
+
+**Drop highlight.** While `shelfDrag` is set, an overlay covers the strip: a 1.5 px dashed 70% white
+outline in the accent blue (70%), the sheen at 30% over 3.5 s, and an opacity pulse from 0.75 to 1. At that strength the card text stays readable. It fades in and out over
+150 ms and takes no pointer events.
+
+**Copied flash and removal.** "Copied" overlays a card for 900 ms, and fades over 150 ms. A removed card
+fades out over 150 ms. A new card rises 6 px and fades in over 220 ms on the island's curve.
 
 **Scroll rule:** every wheel over the strip maps the dominant axis to scrollLeft and calls both
 preventDefault and stopPropagation, even at either end, with no overflow, or when empty. Scrolls
@@ -560,13 +587,39 @@ are instant. Elsewhere, the existing page wheel classifier applies. A pointer sw
 the strip is excluded from page swipes. Pager buttons and their native keyboard activation still
 change pages.
 
-The headless browser harness checked at-rest geometry, wheel consumption including empty/end
-cases, page turning outside the strip, swipe exclusion, focused actions, the copy overlay timeout,
-and mocked file enter/drop/close with no runtime errors. The real Tauri window was not tested:
-clipboard listener opt-outs and contention, copy-back without focus theft, Explorer drag delivery
-through click-through/no-activate/tool-window styles, DPI changes, fullscreen drag cancellation,
-real file open/reveal (including shortcuts, UNC and very long paths), and native keyboard focus
-remain unverified. Reduced-motion CSS was inspected but not exercised in that harness.
+**Reduced motion.** The sheen, the drop pulse and the hover lift stop. Cards arrive and leave by fade
+only, and the Copied flash is instant.
+
+### Shelf file drop (`modules/shelf_drop.rs`)
+
+Tauri's drag-drop events never reached the webview. The overlay is click-through, and a WebView2 child
+never gets the OLE drag while it is. The evidence, from a real OLE drag (`dragtest.ps1`, a WinForms
+source moving across the top of the notch in about 1.5 s):
+
+- Before: the notch did not expand, and the drop went to the Chrome window behind it.
+- Diagnosis: while the overlay was click-through, the hit test skipped it. Once the cursor watcher
+  armed it, `WindowFromPoint` returned the WebView2 child `Chrome_RenderWidgetHostHWND`. OLE then
+  called neither wry's target on that child nor a native target on the top-level window. tao registers
+  its own IDropTarget on the top-level window, so a native one needs `RevokeDragDrop` first.
+- After: the drag armed a catcher window (`NotchyShelfDrop`), `DoDragDrop` returned Copy, and the file
+  landed in the shelf. `during.png` shows the panel on the Shelf with "Drop to shelf" and the dashed
+  outline. `after.png` shows "1 added" and the `dragme.txt` card. The drop went to the catcher (`DoDragDrop` returned Copy), not to Chrome. After the
+  cursor left, the state went Expanded, then Active, then Tucked.
+- A plain text drag through the zone did not expand the panel. The catcher refused it and gave the zone
+  back until the button was released.
+- A mouse drag that starts in the zone (a text selection) armed the catcher but did not expand the
+  panel, and the island stayed Tucked.
+
+The catcher is a 1 x 1 top-level window owned by the overlay. It is layered at alpha 1 of 255, so it is
+invisible but hit-testable, and it has no content. The cursor watcher shows it over the drop zone (the
+pill plus 120 px each side and 60 px down, DPI scaled and clipped to the window) only while the button is
+held and files are on. It hides when the button is released or the cursor leaves, and when a drag carries
+no files it hides until release. Its `IDropTarget` reads `CF_HDROP`. An enter sets the island's file drag,
+so the panel opens, and `shelf://drag` tells the page to show the Shelf. A drop adds the paths and emits
+`shelf://added`. Leave clears the drag.
+
+Not verified: Explorer as the drag source, a second monitor, DPI other than 125%, and a
+drag that starts as a text selection and then carries files.
 
 ### Pager
 Row 16 px tall, 4 px gaps. Each dot is a 16 px hit area with a 5 px white dot at 35% opacity (100%
@@ -620,7 +673,7 @@ Both layouts use a 2 px focus ring at 70% white, offset 2 px. Press feedback is 
 - Under reduced motion: shapes and pages change by fade only (150 ms) with no transform, the equaliser
   bars are static, the HUD bar, the battery glyph, the media progress fill and the ring jump instead of gliding, the timer digits crossfade over
   150 ms, the ripple is hidden, the alert glow sits at 35%, the lyric line and stack do not rise, the
-  spinner pulses instead of turning, and tile and media transport presses do not scale. The timer's mode change is a
+  spinner pulses instead of turning, and tile and media transport presses do not scale. The Shelf sheen and drop pulse stop, and its cards fade only. The timer's mode change is a
   150 ms opacity crossfade in both settings, because it is a fade and carries no motion.
 - Focus rings: a 2 px outline at 70% white in most places. The pager dots use 1 px at 60%. Never remove
   an outline without a replacement.

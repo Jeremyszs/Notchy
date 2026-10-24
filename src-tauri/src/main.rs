@@ -84,7 +84,6 @@ fn main() {
             modules::shelf::shelf_pin,
             modules::shelf::shelf_remove,
             modules::shelf::shelf_clear,
-            modules::shelf::shelf_add_files,
             modules::shelf::shelf_open,
             modules::shelf::shelf_reveal,
             modules::shelf::shelf_drag_active,

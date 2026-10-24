@@ -17,6 +17,7 @@ pub mod media;
 pub mod notifications;
 pub mod stats;
 pub mod shelf;
+pub mod shelf_drop;
 pub mod timer;
 
 use tauri::{AppHandle, Manager};

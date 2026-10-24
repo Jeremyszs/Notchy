@@ -31,3 +31,20 @@ export function extension(name: string, folder = false): string {
 export function wheelRoute(insideStrip: boolean, deltaX: number, deltaY: number) {
   return { consumed: insideStrip, delta: insideStrip ? (Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY) : 0 };
 }
+
+/** A CSS cubic-bezier curve as a function of progress, so a Svelte transition matches the CSS one. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x: number) => number {
+  const axis = (a: number, b: number, t: number) => 3 * a * (1 - t) ** 2 * t + 3 * b * (1 - t) * t ** 2 + t ** 3;
+  return (x) => {
+    // Find the curve parameter whose x matches the input, then read y there.
+    let low = 0;
+    let high = 1;
+    let t = x;
+    for (let i = 0; i < 30; i++) {
+      t = (low + high) / 2;
+      if (axis(x1, x2, t) < x) low = t;
+      else high = t;
+    }
+    return axis(y1, y2, t);
+  };
+}

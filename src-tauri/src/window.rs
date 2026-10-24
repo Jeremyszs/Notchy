@@ -14,6 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
+use crate::modules::shelf_drop;
 use crate::state::{self, IslandState, SharedIsland};
 use crate::config::{self, SharedConfig};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
@@ -31,6 +32,9 @@ const TUCKED_MIN_HIT_HEIGHT: f64 = 10.0;
 // A cursor sweeping across an app's tab strip should not pop the island open.
 const TUCKED_HOVER_DWELL: Duration = Duration::from_millis(250);
 const BASE_DPI: f64 = 96.0;
+// Logical margin around the pill that arms a file drop: 120 px to each side, 60 px down.
+const DROP_ZONE_SIDE: f64 = 120.0;
+const DROP_ZONE_DOWN: f64 = 60.0;
 
 /// Configures the main window, shows it at top-center, and starts the cursor watcher.
 /// Runs from the setup hook, while the window is still hidden.
@@ -52,6 +56,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     window.show()?;
     // Set once more after show() so the style is correct before the first hover edge.
     apply_overlay_styles(hwnd);
+    shelf_drop::create(app, hwnd).map_err(|error| std::io::Error::other(error.to_string()))?;
 
     let island = app.state::<SharedIsland>().inner().clone();
     spawn_cursor_watch(app.clone(), window, hwnd, island);
@@ -166,6 +171,8 @@ fn spawn_cursor_watch(app: AppHandle, window: WebviewWindow, hwnd: HWND, island:
             let held = unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0;
             let files = config::lock(app.state::<SharedConfig>().inner()).shelf.files;
             let armed = drag_armed(state, files, held, rect, scale, cursor);
+            let zone = drop_zone(rect, scale, state.pill_size());
+            shelf_drop::update(armed.then_some(zone), held);
             if dragging && !armed {
                 state::commit(&app, &island, |machine| machine.set_file_drag(false));
                 let _ = app.emit("shelf://drag", false);
@@ -196,11 +203,27 @@ fn spawn_cursor_watch(app: AppHandle, window: WebviewWindow, hwnd: HWND, island:
     });
 }
 
+/// Whether a held button over this zone should turn the overlay into a drop target.
 fn drag_armed(state: IslandState, files: bool, held: bool, rect: RECT, scale: f64, cursor: POINT) -> bool {
-    if !files || !held || state == IslandState::Hidden { return false; }
-    let (w, h) = state.pill_size();
-    // pill_contains already adds HIT_MARGIN.
-    pill_contains(rect, scale, (w + 36.0, h + 18.0), cursor)
+    if !files || !held || state == IslandState::Hidden {
+        return false;
+    }
+    let zone = drop_zone(rect, scale, state.pill_size());
+    (zone.left..zone.right).contains(&cursor.x) && (zone.top..zone.bottom).contains(&cursor.y)
+}
+
+/// The screen rectangle that arms a file drop: the pill plus a wide margin on each side and a deep
+/// one below, clipped to the window. Generous on purpose, so a drag need not aim at the pill.
+fn drop_zone(rect: RECT, scale: f64, (pill_w, pill_h): (f64, f64)) -> RECT {
+    let center_x = (rect.left + rect.right) / 2;
+    let half_width = ((pill_w / 2.0 + DROP_ZONE_SIDE) * scale).round() as i32;
+    let bottom = rect.top + ((pill_h + DROP_ZONE_DOWN) * scale).round() as i32;
+    RECT {
+        left: (center_x - half_width).max(rect.left),
+        top: rect.top,
+        right: (center_x + half_width).min(rect.right),
+        bottom: bottom.min(rect.bottom),
+    }
 }
 
 /// Logical size of the hit area for a state, or None when the island takes no hover.
@@ -276,14 +299,31 @@ mod tests {
 
     #[test]
     fn drag_arming_needs_button_files_visible_and_dpi_scaled_zone() {
+        // Window 1000 px wide at x=0, centred at 500. At scale 2 the idle zone is the 120 px pill
+        // plus 120 logical px each side (360 physical) and 60 logical px down (180 physical).
         let rect = RECT { left: 0, top: 0, right: 1000, bottom: 480 };
         let at = |x, y| POINT { x, y };
-        assert!(drag_armed(IslandState::Idle, true, true, rect, 2.0, at(668, 108)));
-        assert!(!drag_armed(IslandState::Idle, true, true, rect, 2.0, at(669, 108)));
-        assert!(!drag_armed(IslandState::Idle, true, true, rect, 2.0, at(500, 109)));
+        let idle = |x, y| drag_armed(IslandState::Idle, true, true, rect, 2.0, at(x, y));
+        assert!(idle(140, 0));
+        assert!(idle(859, 179));
+        assert!(!idle(139, 0));
+        assert!(!idle(860, 0));
+        assert!(!idle(500, 180));
         assert!(!drag_armed(IslandState::Hidden, true, true, rect, 2.0, at(500, 0)));
         assert!(!drag_armed(IslandState::Idle, false, true, rect, 2.0, at(500, 0)));
         assert!(!drag_armed(IslandState::Idle, true, false, rect, 2.0, at(500, 0)));
+    }
+
+    #[test]
+    fn drop_zone_covers_the_expanded_panel_and_stays_in_the_window() {
+        let rect = RECT { left: 0, top: 0, right: 1000, bottom: 480 };
+        // Expanded is 380 x 192 logical: its whole body, down to the window's bottom, is armed.
+        let zone = drop_zone(rect, 2.0, IslandState::Expanded.pill_size());
+        assert_eq!((zone.left, zone.right, zone.top, zone.bottom), (0, 1000, 0, 480));
+        // A lyrics layout wider than the margin is clipped to a narrow window on both sides.
+        let narrow = RECT { left: 0, top: 0, right: 600, bottom: 480 };
+        let zone = drop_zone(narrow, 1.0, (700.0, 240.0));
+        assert_eq!((zone.left, zone.right), (0, 600));
     }
 
     #[test]

@@ -282,22 +282,19 @@ pub fn shelf_clear(app: AppHandle, handle: State<'_, ShelfHandle>) {
     shelf.clear();
     publish(&app, &shelf);
 }
-#[tauri::command]
-pub fn shelf_add_files(
-    app: AppHandle,
-    handle: State<'_, ShelfHandle>,
-    paths: Vec<String>,
-) -> usize {
+/// Adds dropped paths, newest first, and returns how many were new or moved to the front. Only
+/// absolute paths count, and only while the file switch is on.
+pub fn add_paths(app: &AppHandle, paths: Vec<PathBuf>) -> usize {
     if !config::lock(app.state::<config::SharedConfig>().inner())
         .shelf
         .files
     {
         return 0;
     }
+    let handle = app.state::<ShelfHandle>();
     let mut shelf = lock(&handle.shelf);
     let mut added = 0;
     for path in paths {
-        let path = PathBuf::from(path);
         if path.is_absolute()
             && !path.as_os_str().is_empty()
             && shelf.add(Content::File(path.clone()), now())
@@ -312,7 +309,7 @@ pub fn shelf_add_files(
             added += 1;
         }
     }
-    publish(&app, &shelf);
+    publish(app, &shelf);
     added
 }
 #[tauri::command]

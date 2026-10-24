@@ -34,10 +34,8 @@
   import TimerPage from "./TimerPage.svelte";
   import StatsPage from "./StatsPage.svelte";
   import ShelfPage from "./ShelfPage.svelte";
-  import { onMount } from "svelte";
-  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { invoke } from "@tauri-apps/api/core";
-  import { shelfDrag, addFiles, clearShelfDrag } from "./stores/shelf";
+  import { shelfDrag, clearShelfDrag } from "./stores/shelf";
   import { showShelfDrop } from "./stores/pages";
   import { fade, fly } from "svelte/transition";
   import { islandPath } from "./lib/shape";
@@ -318,32 +316,6 @@
     }
   }
 
-  // File enter is the only drag input that expands; a held mouse button merely arms Rust hit-testing.
-  onMount(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    let dragRevision = 0;
-    void getCurrentWebview().onDragDropEvent(async ({ payload }) => {
-      if (payload.type === "enter" && payload.paths.length > 0 && $config.shelf.files && $islandState !== "hidden") {
-        const revision = ++dragRevision;
-        shelfDrag.set(true);
-        showShelfDrop();
-        await invoke("shelf_drag_active", { active: true }).catch(() => {});
-        if (revision === dragRevision && !disposed && $shelfDrag) showShelfDrop();
-      } else if (payload.type === "leave") {
-        dragRevision += 1;
-        clearShelfDrag();
-      } else if (payload.type === "drop") {
-        dragRevision += 1;
-        if ($config.shelf.files && $islandState !== "hidden" && payload.paths.length > 0) {
-          showShelfDrop();
-          await addFiles(payload.paths).catch(() => {});
-        }
-        clearShelfDrag();
-      }
-    }).then((stop) => { if (disposed) stop(); else unlisten = stop; }).catch(() => {});
-    return () => { disposed = true; dragRevision += 1; unlisten?.(); clearShelfDrag(); };
-  });
 </script>
 
 {#snippet albumArt(size: "sm" | "lg" | "xl")}
