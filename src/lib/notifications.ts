@@ -8,6 +8,8 @@ export interface Notice {
   app: string;
   title: string;
   body: string;
+  /** The app's logo as a data URI, when Windows gave one. */
+  icon?: string;
 }
 
 /** What Windows allows. `unknown` until the listener has been read. */
@@ -17,6 +19,8 @@ export type NotificationAccess = "unknown" | "allowed" | "denied" | "unspecified
 export interface SeenApp {
   id: string;
   name: string;
+  /** The app's logo as a data URI, read the first time the app is seen. */
+  icon?: string;
 }
 
 /** The settings view. Mirrors the notifications snapshot. */

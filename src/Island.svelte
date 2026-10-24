@@ -668,7 +668,11 @@
     <div class="frame" style={frameStyle("notification", shown)}>
       {@render outline("notification")}
       <div class="content notice-row">
-        <span class="notice-badge" aria-hidden="true">{noticeBadge}</span>
+        {#if $notice.icon}
+          <img class="notice-badge icon" src={$notice.icon} alt="" aria-hidden="true" />
+        {:else}
+          <span class="notice-badge" aria-hidden="true">{noticeBadge}</span>
+        {/if}
         <div class="notice-copy" role="status">
           {#key $notice.seq}
             <p class="notice-text" in:rise={textIn} out:fade={{ duration: 120 }}>
@@ -1335,6 +1339,13 @@
     font-weight: 700;
     line-height: 16px;
     text-align: center;
+  }
+
+  /* The app's own logo, when Windows gave one. It keeps its shape, so no disc behind it. */
+  .notice-badge.icon {
+    border-radius: 4px;
+    background: none;
+    object-fit: contain;
   }
 
   /* Each notice is laid over the same grid cell, so an outgoing text fades over the new one

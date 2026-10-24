@@ -449,7 +449,7 @@ impl ArtCache {
 
 /// Wraps JPEG or PNG bytes as a data URI. Sniffing the magic bytes is more reliable than
 /// the stream's content type, which some apps leave empty.
-fn art_data_uri(bytes: &[u8]) -> Option<String> {
+pub(crate) fn art_data_uri(bytes: &[u8]) -> Option<String> {
     let mime = image_mime(bytes)?;
     Some(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
 }

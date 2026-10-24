@@ -10,7 +10,7 @@
 
 mod listener;
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use super::{Module, ModuleContext};
 use crate::config::{self, ConfigFile};
 use crate::modules::controls::ComGuard;
+use crate::modules::media::art_data_uri;
 use crate::state::{self, SharedIsland};
 use listener::{Listener, Toast};
 
@@ -63,6 +64,9 @@ pub enum Access {
 pub struct SeenApp {
     pub id: String,
     pub name: String,
+    /// The app's logo as a data URI, once it has been read. Older files have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// The settings view. Mirrors NotificationsSnapshot in src/lib/notifications.ts.
@@ -82,6 +86,9 @@ pub struct Notice {
     pub app: String,
     pub title: String,
     pub body: String,
+    /// The app's logo as a data URI, when it is known. The island shows its initial otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// A toast that passed the filters and waits for the queue. The queue numbers it.
@@ -90,6 +97,7 @@ pub struct Pending {
     pub app: String,
     pub title: String,
     pub body: String,
+    pub icon: Option<String>,
 }
 
 /// Decides which toasts are new. The first poll after a reset records what is already there and
@@ -154,6 +162,7 @@ impl Queue {
         let notice = Notice {
             seq: self.next_seq,
             app: pending.app,
+            icon: pending.icon,
             title: pending.title,
             body: pending.body,
         };
@@ -249,11 +258,36 @@ pub fn remember(apps: &mut Vec<SeenApp>, id: &str, name: &str) -> bool {
     apps.push(SeenApp {
         id: id.to_string(),
         name: name.to_string(),
+        icon: None,
     });
     if apps.len() > MAX_APPS {
         apps.remove(0);
     }
     true
+}
+
+/// Whether the app with `id` has been seen and still has no logo.
+pub fn needs_icon(apps: &[SeenApp], id: &str) -> bool {
+    apps.iter()
+        .any(|app| app.id.eq_ignore_ascii_case(id) && app.icon.is_none())
+}
+
+/// Stores a logo for the app with `id`. Reports whether anything changed.
+pub fn set_icon(apps: &mut [SeenApp], id: &str, icon: String) -> bool {
+    match apps.iter_mut().find(|app| app.id.eq_ignore_ascii_case(id)) {
+        Some(app) if app.icon.as_deref() != Some(icon.as_str()) => {
+            app.icon = Some(icon);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The logo of the app with `id`, if one has been read.
+pub fn icon_of(apps: &[SeenApp], id: &str) -> Option<String> {
+    apps.iter()
+        .find(|app| app.id.eq_ignore_ascii_case(id))
+        .and_then(|app| app.icon.clone())
 }
 
 /// The messages from the poller and the settings window, read by the scheduler.
@@ -334,6 +368,9 @@ fn run_poller(app: AppHandle, hub: Arc<Hub>, wakes: Receiver<()>, shows: Sender<
     let mut tracker = Tracker::default();
     let mut on = false;
     let mut asked = false;
+    // Apps whose logo was already asked for in this run, found or not, so a failure is not retried
+    // on every poll.
+    let mut logos_tried = HashSet::new();
     loop {
         if !config::notifications_enabled(&app) {
             if on {
@@ -351,7 +388,7 @@ fn run_poller(app: AppHandle, hub: Arc<Hub>, wakes: Receiver<()>, shows: Sender<
             asked = false;
         }
 
-        poll(&app, &hub, &listener, &mut tracker, &mut asked, &shows);
+        poll(&app, &hub, &listener, &mut tracker, &mut asked, &mut logos_tried, &shows);
 
         match wakes.recv_timeout(POLL_INTERVAL) {
             Ok(()) | Err(RecvTimeoutError::Timeout) => {}
@@ -368,6 +405,7 @@ fn poll(
     listener: &Listener,
     tracker: &mut Tracker,
     asked: &mut bool,
+    logos_tried: &mut HashSet<String>,
     shows: &Sender<Message>,
 ) {
     let mut access = listener.access();
@@ -395,6 +433,18 @@ fn poll(
         changed
     });
 
+    // Each app's logo is read once, the first time it is seen without one.
+    for toast in &toasts {
+        let key = toast.app_id.to_lowercase();
+        if logos_tried.contains(&key) || !needs_icon(&hub.lock().apps, &toast.app_id) {
+            continue;
+        }
+        logos_tried.insert(key);
+        if let Some(icon) = listener::logo(toast).and_then(|bytes| art_data_uri(&bytes)) {
+            update(app, hub, |snapshot| set_icon(&mut snapshot.apps, &toast.app_id, icon));
+        }
+    }
+
     let ids: Vec<u32> = toasts.iter().map(|toast| toast.id).collect();
     let denied = config::denied_apps(app);
     let mut fresh: Vec<&Toast> = tracker
@@ -412,6 +462,7 @@ fn poll(
                 app: toast.app_name.clone(),
                 title,
                 body,
+                icon: icon_of(&hub.lock().apps, &toast.app_id),
             };
             let _ = shows.send(Message::Incoming(pending));
         }
@@ -512,6 +563,7 @@ mod tests {
             app: "Mail".to_string(),
             title: title.to_string(),
             body: String::new(),
+            icon: None,
         }
     }
 
@@ -650,7 +702,7 @@ mod tests {
         let mut queue = Queue::default();
         let first = queue.push(pending("one"), clock.at(0));
         let second = queue.push(pending("two"), clock.at(1));
-        assert_eq!(first, vec![Step::Show(Notice { seq: 1, app: "Mail".into(), title: "one".into(), body: String::new() })]);
+        assert_eq!(first, vec![Step::Show(Notice { seq: 1, app: "Mail".into(), title: "one".into(), body: String::new(), icon: None })]);
         assert!(second.is_empty());
         let next = queue.advance(clock.at(5000));
         assert!(matches!(&next[0], Step::Show(notice) if notice.seq == 2));
@@ -776,7 +828,7 @@ mod tests {
         assert!(remember(&mut apps, "Mail", "Mail app"));
         assert!(!remember(&mut apps, "Mail", "Renamed"));
         assert!(!remember(&mut apps, "mail", "Mail app"));
-        assert_eq!(apps, vec![SeenApp { id: "Mail".into(), name: "Mail app".into() }]);
+        assert_eq!(apps, vec![SeenApp { id: "Mail".into(), name: "Mail app".into(), icon: None }]);
     }
 
     #[test]
@@ -800,7 +852,7 @@ mod tests {
     fn the_snapshot_serializes_for_the_settings_window() {
         let json = serde_json::to_string(&Snapshot {
             access: Access::Unspecified,
-            apps: vec![SeenApp { id: "a".into(), name: "A".into() }],
+            apps: vec![SeenApp { id: "a".into(), name: "A".into(), icon: None }],
         })
         .unwrap();
         assert_eq!(
@@ -817,9 +869,32 @@ mod tests {
             app: "Mail".into(),
             title: "Hi".into(),
             body: "There".into(),
+            icon: None,
         })
         .unwrap();
         assert_eq!(json, r#"{"seq":3,"app":"Mail","title":"Hi","body":"There"}"#);
+    }
+
+    #[test]
+    fn a_logo_is_stored_once_per_app_and_read_back() {
+        let mut apps = Vec::new();
+        remember(&mut apps, "Mail", "Mail");
+        assert!(needs_icon(&apps, "mail"));
+        assert!(!needs_icon(&apps, "Unknown"));
+        assert!(set_icon(&mut apps, "MAIL", "data:image/png;base64,AA==".into()));
+        assert!(!set_icon(&mut apps, "Mail", "data:image/png;base64,AA==".into()));
+        assert!(!set_icon(&mut apps, "Unknown", "x".into()));
+        assert!(!needs_icon(&apps, "Mail"));
+        assert_eq!(icon_of(&apps, "mail").as_deref(), Some("data:image/png;base64,AA=="));
+        assert_eq!(icon_of(&apps, "Unknown"), None);
+    }
+
+    #[test]
+    fn an_apps_file_from_before_logos_still_loads() {
+        let apps: Vec<SeenApp> = serde_json::from_str(r#"[{"id":"Mail","name":"Mail"}]"#).unwrap();
+        assert_eq!(apps[0].icon, None);
+        let json = serde_json::to_string(&SeenApp { id: "a".into(), name: "A".into(), icon: Some("i".into()) }).unwrap();
+        assert_eq!(json, r#"{"id":"a","name":"A","icon":"i"}"#);
     }
 
     #[test]
@@ -827,7 +902,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("notchy-notif-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let path = dir.join(APPS_FILE);
-        let apps = vec![SeenApp { id: "Mail".into(), name: "Mail".into() }];
+        let apps = vec![SeenApp { id: "Mail".into(), name: "Mail".into(), icon: None }];
         write_apps(&path, &apps).unwrap();
         assert_eq!(load_apps(&path), apps);
         assert!(load_apps(&dir.join("missing.json")).is_empty());

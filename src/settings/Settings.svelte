@@ -482,6 +482,17 @@
   <div class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>Space</kbd></div>
 {/snippet}
 
+<!-- The side panel on wide windows: the feature's notch picture, larger, with a sentence. -->
+{#snippet preview(art: import("svelte").Snippet, color: string, caption: string)}
+  <div class="preview-card" style="--c: {color}">
+    <div class="art"><div class="zoom">{@render art()}</div></div>
+    <p>{caption}</p>
+  </div>
+{/snippet}
+{#snippet artBrand()}
+  <div class="mock pill wide brand-pill"><span class="brand-mark"></span><span class="m-text">Notchy</span></div>
+{/snippet}
+
 <!-- A settings row: an icon tile, a name with an optional line under it, and a control on the right. -->
 {#snippet rowHead(icon: string, color: string, name: string, line: string = "")}
   <span class="tile" style="--c: {color}"><Glyph name={icon} size={16} /></span>
@@ -571,6 +582,7 @@
               Drag to change the order, or select one and use the arrow keys. Hover and press the minus to remove it.
             </p>
 
+            <div class="editors">
             <section class="card editor" aria-labelledby="pages-title">
               <div class="card-head">
                 <h2 id="pages-title">Pages</h2>
@@ -655,8 +667,10 @@
                 </div>
               {/if}
             </section>
+            </div>
             <p class="sr-only" role="status" aria-live="polite">{announcement}</p>
           {:else if section === "appearance"}
+            <div class="appearance">
             <div class="font-preview" aria-hidden="true">
               <div class="mock-notch">
                 <span class="m-art big"></span>
@@ -685,7 +699,10 @@
                 </button>
               {/each}
             </div>
+            </div>
           {:else if section === "timer"}
+            <div class="split">
+            <div class="main">
             <div class="card">
               <div class="row">
                 {@render rowHead("sound", "#FF9F0A", "Sound when a timer ends")}
@@ -725,7 +742,12 @@
               {/each}
             </div>
             <p class="note">A long break comes after four focus sessions.</p>
+            </div>
+            <aside class="aside" aria-hidden="true">{@render preview(artTimer, "#FF9F0A", "The ring fills as a timer runs, and the notch chimes when it ends.")}</aside>
+            </div>
           {:else if section === "calendar"}
+            <div class="split">
+            <div class="main">
             <div class="card">
               <div class="row">
                 {@render rowHead("calendar", "#FF6A3D", "Reminders for events", "Kept on this PC, never sent anywhere")}
@@ -768,7 +790,12 @@
             </div>
             <h2 class="group-title">Notes</h2>
             <CalendarMonth {addRequest} />
+            </div>
+            <aside class="aside" aria-hidden="true">{@render preview(artCalendar, "#FF6A3D", "A reminder slides out of the notch before each event.")}</aside>
+            </div>
           {:else if section === "notifications"}
+            <div class="split">
+            <div class="main">
             <div class="card">
               <div class="row">
                 {@render rowHead("notifications", "#FF453A", "Show notifications from other apps", notifyOn ? accessCopy($notificationsStatus.access) : "Read on this PC and never saved")}
@@ -785,14 +812,23 @@
               <div class="app-grid" class:disabled={!notifyOn}>
                 {#each $notificationsStatus.apps as app (app.id)}
                   <div class="app-row">
-                    <span class="avatar" aria-hidden="true">{app.name.slice(0, 1).toUpperCase()}</span>
+                    {#if app.icon}
+                      <img class="avatar icon" src={app.icon} alt="" aria-hidden="true" />
+                    {:else}
+                      <span class="avatar" aria-hidden="true">{app.name.slice(0, 1).toUpperCase()}</span>
+                    {/if}
                     <span class="label">{app.name}</span>
                     <Switch checked={isAllowed(app.id, deniedApps)} label="Show notifications from {app.name}" disabled={!notifyOn} onchange={(on) => toggleApp(app.id, on)} />
                   </div>
                 {/each}
               </div>
             {/if}
+            </div>
+            <aside class="aside" aria-hidden="true">{@render preview(artNotice, "#0A84FF", "Alerts from the apps you allow show in the notch, then tuck away.")}</aside>
+            </div>
           {:else if section === "battery"}
+            <div class="split">
+            <div class="main">
             <div class="card">
               <div class="row">
                 {@render rowHead("battery", "#30D158", "Battery alerts", statusCopy($batteryStatus))}
@@ -807,7 +843,12 @@
                 <Switch checked={batteryLow} label="Low battery warnings" disabled={!batteryOn || !$batteryStatus} onchange={(on) => { batteryLow = on; scheduleSave(); }} />
               </div>
             </div>
+            </div>
+            <aside class="aside" aria-hidden="true">{@render preview(artBattery, "#30D158", "Plugging in, a full charge and a low battery each get a moment in the notch.")}</aside>
+            </div>
           {:else if section === "shelf"}
+            <div class="split">
+            <div class="main">
             <div class="card">
               <div class="row">
                 {@render rowHead("clipboard", "#6CB8FF", "Remember copied text", "Memory only, cleared on quit. Passwords are skipped")}
@@ -818,7 +859,12 @@
                 <Switch checked={shelfFiles} label="Accept dropped files" onchange={(on) => { shelfFiles = on; scheduleSave(); }} />
               </div>
             </div>
+            </div>
+            <aside class="aside" aria-hidden="true">{@render preview(artShelf, "#6CB8FF", "Drop files on the notch or copy text, then find them on the Shelf page.")}</aside>
+            </div>
           {:else if section === "hotkeys"}
+            <div class="split">
+            <div class="main">
             <div class="card">
               <div class="row">
                 {@render rowHead("hotkeys", "#8E8E93", "Global hotkeys", "Off until you turn them on")}
@@ -852,7 +898,12 @@
               {/each}
             </div>
             <p class="note">Type a combination such as Ctrl+Alt+Space. Clear a box to turn it off. A key another app already uses cannot be taken.</p>
+            </div>
+            <aside class="aside" aria-hidden="true">{@render preview(artKeys, "#8E8E93", "Shortcuts work in every app, even while the notch is tucked away.")}</aside>
+            </div>
           {:else if section === "general"}
+            <div class="split">
+            <div class="main">
             <div class="card">
               <div class="row">
                 {@render rowHead("power", "#30D158", "Launch at login")}
@@ -881,6 +932,9 @@
               <span class="brand-mark big" aria-hidden="true"></span>
               <p><b>Notchy</b> {version}</p>
               <p>Lyrics come from lrclib.net.</p>
+            </div>
+            </div>
+            <aside class="aside" aria-hidden="true">{@render preview(artBrand, "#5E5CE6", "Notchy lives in the notch and the tray. Settings save as you change them.")}</aside>
             </div>
           {/if}
         </div>
@@ -920,7 +974,7 @@
      sits one level in. */
   .shell {
     height: 100vh;
-    container-type: inline-size;
+    container: shell / inline-size;
   }
 
   .app {
@@ -1034,6 +1088,7 @@
   }
 
   .content {
+    container: pane / inline-size;
     min-height: 0;
     overflow-y: auto;
     scrollbar-width: thin;
@@ -1042,7 +1097,7 @@
 
   .section {
     box-sizing: border-box;
-    max-width: 880px;
+    max-width: 1180px;
     margin: 0 auto;
     padding: 28px 32px 40px;
   }
@@ -1949,6 +2004,14 @@
     white-space: nowrap;
   }
 
+  /* The app's own logo sits on a faint plate, since many logos are drawn for a light or a coloured tile. */
+  .avatar.icon {
+    box-sizing: border-box;
+    padding: 3px;
+    background: rgb(255 255 255 / 8%);
+    object-fit: contain;
+  }
+
   .avatar {
     display: grid;
     flex: none;
@@ -2040,7 +2103,7 @@
   }
 
   /* Narrow windows: the sidebar turns into a scrolling row of tabs, and the padding tightens. */
-  @container (max-width: 720px) {
+  @container shell (max-width: 720px) {
     .app {
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: auto minmax(0, 1fr);
@@ -2095,7 +2158,7 @@
   }
 
   /* Very narrow: rows stack their control under the text when there is no room beside it. */
-  @container (max-width: 440px) {
+  @container shell (max-width: 440px) {
     .feature-grid {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -2106,6 +2169,88 @@
 
     .accelerator {
       width: 120px;
+    }
+  }
+
+  /* --- Wide windows. The pane is the container, so these follow the space beside the sidebar. */
+  .aside {
+    display: none;
+  }
+
+  .preview-card {
+    position: sticky;
+    top: 0;
+    border-radius: 16px;
+    background: var(--card);
+    box-shadow: inset 0 0 0 0.5px var(--card-line);
+    overflow: hidden;
+  }
+
+  .preview-card .art {
+    height: 200px;
+  }
+
+  /* The picture is drawn at card size and scaled up, so it stays one drawing. */
+  .preview-card .zoom {
+    transform: scale(1.7);
+    transform-origin: top center;
+  }
+
+  .preview-card p {
+    margin: 0;
+    padding: 14px 16px 16px;
+    font-size: 13px;
+    line-height: 19px;
+    color: var(--text-2);
+  }
+
+  .brand-pill {
+    gap: 8px;
+  }
+
+  @container pane (min-width: 940px) {
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+      align-items: start;
+      gap: 24px;
+    }
+
+    .aside {
+      display: block;
+    }
+
+    .editors {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: start;
+      gap: 14px;
+    }
+
+    .editor + .editor {
+      margin-top: 0;
+    }
+
+    .appearance {
+      display: grid;
+      grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.1fr);
+      align-items: start;
+      gap: 20px;
+    }
+
+    .appearance .font-preview {
+      position: sticky;
+      top: 0;
+      height: 260px;
+      align-items: flex-start;
+    }
+
+    .appearance .font-grid {
+      margin-top: 0;
+    }
+
+    .head {
+      margin-bottom: 28px;
     }
   }
 

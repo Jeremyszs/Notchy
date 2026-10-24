@@ -296,7 +296,7 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Panel page wash | top-centre radial glow, fading out by 75% | | Media: album tint at 70%. Timer: the mode's `from` at 22%. Calendar `#FF6A3D`, Shelf `#6CB8FF`, Stats `#0A84FF`, each at 20%. Controls: none. Crossfades over 400 ms by opacity (`washes` in `Island.svelte`) |
 | Rim light (every outline) | `#FFFFFF` at 0 to 10% | | a 1 px stroke whose gradient starts at 45% of the height, so only the bottom edge and corners catch it |
 | Media (lyrics tint) | hue from the album art, saturation 45 to 75%, lightness 28 to 40% (`src/lib/tint.ts`) | | fades to `#000` by 85% of the height |
-| Notification (pill) | `#0A84FF` | `#64D2FF` | blue. The badge only: the text stays white |
+| Notification (pill) | `#0A84FF` | `#64D2FF` | blue. The badge only: the text stays white. When Windows gives the app's logo, the badge is that logo (16 px, 4 px radius, no disc) instead |
 | Battery, charger and full | `#30D158` | | solid glyph fill (no gradient). Green is the charger |
 | Battery, on battery | `#FFFFFF` | | solid glyph fill, neutral |
 | Battery low, 20% | `#FF9F0A` | | solid glyph fill, amber (Apple orange) |
@@ -558,12 +558,18 @@ full 102 px again, so the grid and the page do not move when the strip appears. 
 
 ### Settings window (`src/settings/Settings.svelte`)
 
-**Frame.** The window opens at 900 x 640 and can shrink to 400 x 440 (`tray.rs`). A `.shell` is the size
-container, and `.app` inside it is the grid, because a container query cannot restyle the element it
-measures. Wider than 720 px: a 220 px sidebar (`#111113`) and a scrolling pane. At 720 px and below the
+**Frame.** The window opens at 900 x 640 and can shrink to 400 x 440 (`tray.rs`). Two named size
+containers: `shell` (the window, on `.shell`; `.app` inside it is the grid, because a container query
+cannot restyle the element it measures) and `pane` (the scrolling content, on `.content`). Wider than 720 px: a 220 px sidebar (`#111113`) and a scrolling pane. At 720 px and below the
 sidebar becomes a row of pill tabs along the top that scrolls sideways, and the pane padding drops from
 28 / 32 px to 20 / 16 px. At 440 px and below the feature grid is one column and the section blurb hides.
-Nothing scrolls sideways at any width (checked at 355 and 900 px).
+Nothing scrolls sideways at any width (checked at 355, 900 and 1280 px).
+
+**Wide windows.** The section is up to 1180 px wide. When the pane is at least 940 px: the short sections
+(Timer, Calendar, Notifications, Battery, Shelf, Hotkeys, General) split into the settings and a sticky
+340 px preview card, which shows that feature's notch picture scaled 1.7x on a 200 px glow with one
+sentence under it; the two Notch layout editors sit side by side; Appearance puts the notch preview
+(sticky) beside the font grid. Below 940 px the preview card is hidden and everything stacks.
 
 **Sections.** One section shows at a time, picked in the sidebar and remembered in `localStorage`
 (`notchy.settings.section`, wrapped in try/catch). Each has a colour tile, as System Settings does:
@@ -598,6 +604,12 @@ keys move the choice.
 
 **Timer.** Three length cards in their mode colours (focus `#FF453A`, short break `#30D158`, long break
 `#64D2FF`) with minus and plus buttons and the number (28 / 600, tabular) typed in place.
+
+**Notification apps.** Each app shows its real logo, read once per app from `AppInfo.DisplayInfo.GetLogo`
+(64 px, at most 256 KB) the first time the app sends a toast, and saved as a data URI in
+`notification-apps.json` (`icon`, absent in older files). The logo sits on a 30 px plate at 8% white with
+3 px padding; an app without a logo keeps the blue letter tile. Apps are a grid of cards
+(`minmax(240px, 1fr)`).
 
 **Add note from the notch.** Settings listens for `calendar://add-note` and also takes a pending day on
 load (`calendar_take_add_date`), so a request is never left to open the form later. It switches to the

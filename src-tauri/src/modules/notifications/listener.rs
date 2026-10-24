@@ -3,11 +3,15 @@
 //! data, and `notifications.rs` decides what to show.
 //!
 //! The listener's change event fails for unpackaged apps (0x80070490), so toasts are read by
-//! polling `GetNotificationsAsync`. Icons and click actions are not read.
+//! polling `GetNotificationsAsync`. Click actions are not read. An app's logo is read once, on
+//! request (`logo`), for the settings list and the island's badge.
 
 use std::future::IntoFuture;
 
 use tauri::async_runtime::block_on;
+use windows::ApplicationModel::AppInfo;
+use windows::Foundation::Size;
+use windows::Storage::Streams::DataReader;
 use windows::UI::Notifications::Management::{
     UserNotificationListener, UserNotificationListenerAccessStatus,
 };
@@ -24,6 +28,34 @@ pub struct Toast {
     /// The app's display name, for the label. Falls back to the id.
     pub app_name: String,
     pub lines: Vec<String>,
+    /// The app's WinRT info, kept so its logo can be read later without another lookup.
+    pub info: Option<AppInfo>,
+}
+
+// A logo is asked for at this size, in px. Windows picks the nearest asset it has.
+const LOGO_PX: f32 = 64.0;
+// A logo bigger than this is not kept: it would bloat notification-apps.json.
+const MAX_LOGO_BYTES: u64 = 256 * 1024;
+
+/// The app's logo as image bytes (PNG for packaged apps, usually), or None when Windows has none.
+pub fn logo(toast: &Toast) -> Option<Vec<u8>> {
+    let display = toast.info.as_ref()?.DisplayInfo().ok()?;
+    let reference = display
+        .GetLogo(Size {
+            Width: LOGO_PX,
+            Height: LOGO_PX,
+        })
+        .ok()?;
+    let stream = wait(reference.OpenReadAsync()).ok()?;
+    let size = stream.Size().ok()?;
+    if size == 0 || size > MAX_LOGO_BYTES {
+        return None;
+    }
+    let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).ok()?).ok()?;
+    wait(reader.LoadAsync(size as u32)).ok()?;
+    let mut bytes = vec![0; size as usize];
+    reader.ReadBytes(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// The user notification listener for this app.
@@ -135,5 +167,6 @@ fn read(notification: &UserNotification) -> Option<Toast> {
         app_id,
         app_name,
         lines,
+        info: Some(info),
     })
 }
