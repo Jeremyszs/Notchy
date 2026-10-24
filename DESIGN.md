@@ -8,7 +8,8 @@ number below comes from the code. If you change a number, change it here too.
 ## 1. Design principles
 
 - **Pitch black.** The notch is `#000`. Every shape fills with `#000`, and the only colour comes from
-  content: album art, a timer accent, a HUD bar. Text is white at a fixed set of opacities (section 4).
+  content: album art, a timer accent, a HUD bar, and each panel page's wash (section 5). A rim at 10%
+  white catches light along the bottom edge of every outline, so the notch reads as an object. Text is white at a fixed set of opacities (section 4).
 - **Apple reference.** The island reads as a physical notch that grows. Shapes spring open from the top
   centre, the outline flares out of the top edge with concave ears, and the bottom corners stay convex.
   Nothing has a border or a shadow except the alert glow.
@@ -290,7 +291,10 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Long break | `#64D2FF` | `#64D2FF` | teal blue, flat |
 | Stopwatch | `#FFFFFF` | `#8E8E93` | white to grey |
 | Alert | the finished timer's palette | | ring, glow and the strong button |
-| Media (active pill) | white bars and title | | no accent: the artwork is the colour |
+| Media (active pill) | equaliser bars `--tint-hi` at the base to white at 85% | | `--tint-hi` is the album tint mixed with 45% white in oklab, set on `.island`. The title stays white |
+| Album art glow (pill, panel, lyrics) | `--tint-hi` at 50 to 55% | | box-shadow around `.art.sm`, `.lg`, `.xl`. The art colours the black around it |
+| Panel page wash | top-centre radial glow, fading out by 75% | | Media: album tint at 70%. Timer: the mode's `from` at 22%. Calendar `#FF6A3D`, Shelf `#6CB8FF`, Stats `#0A84FF`, each at 20%. Controls: none. Crossfades over 400 ms by opacity (`washes` in `Island.svelte`) |
+| Rim light (every outline) | `#FFFFFF` at 0 to 10% | | a 1 px stroke whose gradient starts at 45% of the height, so only the bottom edge and corners catch it |
 | Media (lyrics tint) | hue from the album art, saturation 45 to 75%, lightness 28 to 40% (`src/lib/tint.ts`) | | fades to `#000` by 85% of the height |
 | Notification (pill) | `#0A84FF` | `#64D2FF` | blue. The badge only: the text stays white |
 | Battery, charger and full | `#30D158` | | solid glyph fill (no gradient). Green is the charger |
@@ -314,8 +318,9 @@ Use a union of child boxes, not the page's own box (a page root with `height: 10
 | Island calendar page, snooze buttons | `#FF6A3D` | | link text (7.4:1 on `#000`), with a 14% accent fill on hover |
 | Media progress bar | `#FFFFFF` | | the fill, on a track at 16% white. No accent: the artwork is the colour |
 | Settings form, chips on | `#FFFFFF` | | a toggle that is on: white with a black label, as the switches are |
-| Shelf accent (mode pill, drop outline and sheen, Copied flash, pin mark) | `#8CCBFF` | `#6CB8FF`, `#5AAEF7` | One soft sky blue, in three tints for the moving sheen. No other hue on the Shelf. The pin is a stroke in the accent. The mode pill is the only solid accent fill, and it carries dark text, never white |
-| Shelf card tint (text and file cards alike) | `#6CB8FF` at 10% | | over the 8% white card, so kind is told by the glyph only. Text stays 90% white (about 12:1 on the tinted card, computed) |
+| Shelf accent (mode pill, drop outline and sheen, Copied flash, pin mark, empty tray) | `#8CCBFF` | `#6CB8FF`, `#5AAEF7` | One soft sky blue. The pin is a stroke in the accent. The mode pill is lit from above (`#B0DCFF` to `#6CB8FF`, a 45% white inner top edge, a 35% accent glow) and carries dark text, never white |
+| Shelf card | white 11% to 6% top to bottom, a 0.5 px 9% white edge | | a corner glow from the top left in the card's colour at 20%: the Shelf blue for text, the file family colour for files |
+| Shelf file families (`FAMILY_COLORS`, `lib/shelf.ts`) | image `#FF6482`, video `#BF5AF2`, audio `#FF9F0A`, PDF `#FF453A`, doc `#0A84FF`, sheet `#30D158`, slides `#FFD60A`, archive `#C9A26B`, code `#64D2FF`, other `#8E8E93` | | the extension chip (fill at 22%, text mixed 30% toward white) and the card's corner glow. The only hues on the Shelf other than the accent |
 
 - **Accent use.** An accent fills a ring, a strong pill, a filled pomodoro session, or the glow. It is
   never used for body text. A filled session dot is the accent at 100%, an empty one is the accent at
@@ -571,7 +576,7 @@ Measured in the harness: 0 notes (2 October), 1 note (6 October), 4 notes (23 Oc
 
 `ShelfPage.svelte` fills the 348 x 146 page box with one centred block, 144 px tall: a 24 px mode switch, an 8 px gap, an 84 px card row, an 8 px gap and a 20 px Clear row. That leaves 1 px above and below. Measured in the browser harness with `offsetTop` (switch top 1, card row top 33, Clear row top 125, 1 px under it). The page is the Shelf in the expanded panel, and the cards are 96 x 84, so the next card peeks 36 px at the right edge (fourth card at x 312).
 
-**Modes.** The switch is a 184 px track at 8% white with a light-blue pill (`#8CCBFF` to `#6CB8FF`, inset 2 px). The pill slides between the two labels by transform over 220 ms on the island's curve. The labels are "Files" and "Text" (12 / 16, 600), each with its count (11 / 14, 600). The selected label is dark (10 16 24 at 90%) on the pill, because white on `#8CCBFF` is about 1.7:1 and that dark is about 10.8:1 (computed). The switch is `role="tablist"` with `role="tab"` buttons, `aria-selected`, and a roving tabindex. Left and Right switch the mode and move focus. A 2 px 70% white focus ring shows. Each mode shows only its own items in its own row, and the rows crossfade over 160 ms. The mode is kept in memory (`shelfMode`, `stores/shelf.ts`) while the app runs. Until the first pick it is Files, or Text when clipboard history is on and file drops are off. A file drag onto the notch always selects Files.
+**Modes.** The switch is a 184 px track at 8% white with a lit light-blue pill (section 5, inset 2 px). The pill slides between the two labels on the smooth spring. The labels are "Files" and "Text" (12 / 16, 600), each with its count (11 / 14, 600). The selected label is dark (10 16 24 at 90%) on the pill, because white on `#8CCBFF` is about 1.7:1 and that dark is about 10.8:1 (computed). The switch is `role="tablist"` with `role="tab"` buttons, `aria-selected`, and a roving tabindex. Left and Right switch the mode and move focus. A 2 px 70% white focus ring shows. Each mode shows only its own items in its own row. The new row slides 14 px in from its tab's side (Text from the right, Files from the left) on the smooth spring while the old one fades over 120 ms. The mode is kept in memory (`shelfMode`, `stores/shelf.ts`) while the app runs. Until the first pick it is Files, or Text when clipboard history is on and file drops are off. A file drag onto the notch always selects Files.
 
 **Empty states.** A mode with nothing to show gets its own dashed 84 px card with a tray glyph. Files: "Drop files here", with "Files stay where they are". When Accept dropped files is off, the second line is "Accept dropped files is off, turn it on in Settings". Text: "Copy text to keep it here", with "Copied text stays in memory". When Clipboard history is off, the second line is "Clipboard history is off, turn it on in Settings". A mode whose switch is off shows its empty state even if its items are still in memory.
 
@@ -579,19 +584,19 @@ Measured in the harness: 0 notes (2 October), 1 note (6 October), 4 notes (23 Oc
 
 **Clear.** A ghost pill at the bottom centre: 60% white, 11 / 14, 600, 20 px tall. It is disabled at 35% when the current mode has nothing unpinned. It removes the unpinned items of the current mode only (`shelf_clear` with `kind`: "text" or "file"). Pinned items and the other mode stay.
 
-**Cards.** Each has a 12 px radius on the 10% accent tint over the 8% white, and kind is shown by the glyph alone. The kind glyph or pin sits 8 px from the top. A 2-line text preview or file name starts 24 px down. The footer, 8 px from the bottom, holds the age (now, 2m, 1h, 3d) and, for a file, the extension. A missing file is at 45% opacity and shows "Missing" in place of the age. Pinned items come first, then the newest.
+**Cards.** Each has a 12 px radius, a glass fill lit from above and a corner glow in its colour (section 5). A file shows its extension as a 14 px chip in its family colour (9 px, 700, upper case, at most 52 px); a file with no extension, and every text card, shows the kind glyph instead. The chip, glyph or pin sits 7 to 8 px from the top. A 2-line text preview or file name starts 24 px down. The footer, 8 px from the bottom, holds the age (now, 2m, 1h, 3d). A missing file is at 45% opacity and shows "Missing" in place of the age. Pinned items come first, then the newest.
 
-**Hover and focus.** A card lifts 1 px. The footer fades, and a dark glass pill appears at the bottom centre with Pin or Unpin, Show in Explorer (files only) and Remove. Each is a real button with a label and a focus ring.
+**Hover and focus.** A card lifts 2 px on the snappy spring and brightens by a 5% white layer (opacity only). A press sinks it to 0.97. The footer fades, and a dark glass pill appears at the bottom centre with Pin or Unpin, Show in Explorer (files only) and Remove. Each is a real button with a label and a focus ring.
 
 **Motion.** Removing one card: it fades, scales to 0.92 and lifts 6 px over 180 ms on `cubic-bezier(0.2, 0.8, 0.2, 1)`. Then the item is removed, and the cards after it slide into the gap with `animate:flip` over 180 ms on the same curve. Clear: the unpinned cards of the mode leave with the same motion, 35 ms apart, the last starting by 240 ms, so the whole clear ends by 420 ms. Then the empty state fades in. The animation runs first and the backend is called after it, so the cards never pop. A second click on a card that is leaving is ignored, and Clear is disabled while it runs. Reduced motion: a removed or cleared card disappears at once, the slide is instant, and the mode pill jumps.
 
-**Drop highlight.** While `shelfDrag` is set, an overlay covers the card row: a 1.5 px dashed 70% white outline in the accent blue, the sheen at 30% over 3.5 s, and an opacity pulse from 0.75 to 1. It fades in and out over 150 ms and takes no pointer events.
+**Drop highlight.** While `shelfDrag` is set, an overlay covers the card row: a 1.5 px dashed 70% white outline in the accent blue, a 24 px inner glow of the accent at 25%, the sheen at 30% over 3.5 s, and an opacity pulse from 0.75 to 1. It fades in and out over 150 ms and takes no pointer events.
 
-**Copied flash.** "Copied" overlays a card for 900 ms, and fades over 150 ms. It shows only after a copy succeeds.
+**Copied flash.** A check and "Copied" in the accent overlay a card on 88% dark navy for 900 ms. The overlay fades over 150 ms and the mark pops from 0.8 on the bouncy spring. It shows only after a copy succeeds.
 
 **Scroll rule.** Every wheel over the card row maps the dominant axis to scrollLeft and calls both preventDefault and stopPropagation, even at either end, with no overflow, or when empty. Scrolls are instant. Elsewhere, the existing page wheel classifier applies. A pointer swipe beginning on the card row is excluded from page swipes (`swipeStart`). Pager buttons and their native keyboard activation still change pages.
 
-**Reduced motion.** The sheen, the drop pulse and the hover lift stop. Cards arrive and leave by opacity only, and the Copied flash is instant.
+**Reduced motion.** The sheen, the drop pulse, the hover lift and the press stop. Cards arrive and leave by opacity only, the mode row fades without sliding, and the Copied flash is instant with no pop.
 
 ### Shelf drag out (`modules/shelf_drag.rs`)
 

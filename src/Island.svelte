@@ -177,6 +177,17 @@
   // The last ten seconds beat once per displayed second. The key changes with the digits.
   $: beatKey = timer.lastTen ? timer.label : "";
 
+  // Each panel page washes the top of the panel in its own colour, which crossfades as pages change.
+  // Media takes the album colour, Timer its mode's accent; Controls stays black. `a` is the strength.
+  $: washes = {
+    media: $mediaState.active ? { c: $tint.color, a: 70 } : null,
+    timer: { c: timer.palette.from, a: 22 },
+    calendar: { c: "#FF6A3D", a: 20 },
+    shelf: { c: "#6CB8FF", a: 20 },
+    stats: { c: "#0A84FF", a: 20 },
+    controls: null,
+  } satisfies Record<Page, { c: string; a: number } | null>;
+
   // The compact pill shows the title, or the artist when the title is empty.
   $: activeLabel = $mediaState.title || $mediaState.artist;
 
@@ -520,16 +531,31 @@
 
 {#snippet outline(name: Shown, box?: { w: number; h: number })}
   {@const { w, h, ear } = sizeOf(name, box)}
+  {@const d = islandPath(w, h, ear, Math.min(h / 2, 24), BLEED)}
   <svg
     class="outline"
     viewBox="0 {-BLEED} {w + 2 * ear} {h + BLEED}"
     aria-hidden="true"
   >
-    <path d={islandPath(w, h, ear, Math.min(h / 2, 24), BLEED)} />
+    <!-- The rim catches light only along the bottom, so the notch reads as an object, not a hole. -->
+    <defs>
+      <linearGradient id="rim-{name}" gradientUnits="userSpaceOnUse" x1="0" y1={h * 0.45} x2="0" y2={h}>
+        <stop offset="0" stop-color="#fff" stop-opacity="0" />
+        <stop offset="1" stop-color="#fff" stop-opacity="0.1" />
+      </linearGradient>
+    </defs>
+    <path {d} />
+    <path class="rim" {d} stroke="url(#rim-{name})" />
   </svg>
 {/snippet}
 
-<div class="island" class:hidden={$islandState === "hidden"} class:shrink={shrinking} bind:this={islandEl}>
+<div
+  class="island"
+  class:hidden={$islandState === "hidden"}
+  class:shrink={shrinking}
+  style="--tint: {$tint.color}"
+  bind:this={islandEl}
+>
   <div
     class="shape idle"
     class:on={$islandState === "idle"}
@@ -757,6 +783,12 @@
   >
     <div class="frame" style={frameStyle("expanded", shown)}>
       {@render outline("expanded")}
+      {#each $enabledPages as id (id)}
+        {@const wash = washes[id]}
+        {#if wash}
+          <span class="wash" class:on={$page === id} style="--wash: {wash.c}; --wash-a: {wash.a}%" aria-hidden="true"></span>
+        {/if}
+      {/each}
       <div class="content panel">
         <div class="pages">
           {#each $enabledPages as id (id)}
@@ -902,6 +934,8 @@
   /* Vertical motion never overshoots. A slide past its rest point would lift the top edge off y=0. */
   .island {
     --bleed: 16px; /* Matches BLEED in the script. */
+    /* The album colour lifted for use on black: the equaliser and the glow around the art. */
+    --tint-hi: color-mix(in oklab, var(--tint), #fff 45%);
     position: absolute;
     inset: 0;
     /* Only the shapes that are on take clicks, so the rest of the window passes through. */
@@ -969,6 +1003,28 @@
     pointer-events: none;
   }
 
+  /* A page's colour wash: a soft glow from the top centre that fades out before the pager. */
+  .wash {
+    position: absolute;
+    top: 0;
+    left: var(--ear);
+    width: var(--w);
+    height: 100%;
+    border-radius: 0 0 24px 24px;
+    background: radial-gradient(
+      140% 100% at 50% 0%,
+      color-mix(in srgb, var(--wash) var(--wash-a), transparent),
+      transparent 75%
+    );
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 400ms ease;
+  }
+
+  .shape.on .wash.on {
+    opacity: 1;
+  }
+
   /* The outline starts BLEED px above the window top. The window clips at y=0. */
   .outline {
     position: absolute;
@@ -978,6 +1034,11 @@
     height: calc(100% + var(--bleed));
     overflow: visible;
     fill: #000;
+  }
+
+  .outline .rim {
+    fill: none;
+    stroke-width: 1;
   }
 
   /* Content leaves at once, softening and shrinking towards the top edge. It enters 60 ms after its
@@ -1055,19 +1116,23 @@
     color: rgba(255, 255, 255, 0.7);
   }
 
+  /* The art glows in its own colour, so the album colours the black around it. */
   .art.sm {
     width: 20px;
     height: 20px;
+    box-shadow: 0 0 10px 0 color-mix(in srgb, var(--tint-hi) 55%, transparent);
   }
 
   .art.lg {
     width: 72px;
     height: 72px;
+    box-shadow: 0 6px 22px -4px color-mix(in srgb, var(--tint-hi) 50%, transparent);
   }
 
   .art.xl {
     width: 88px;
     height: 88px;
+    box-shadow: 0 8px 26px -4px color-mix(in srgb, var(--tint-hi) 50%, transparent);
   }
 
   .art img {
@@ -1121,7 +1186,7 @@
     width: 3px;
     height: 100%;
     border-radius: 1.5px;
-    background: #fff;
+    background: linear-gradient(to top, var(--tint-hi), #fff 85%);
     transform-origin: bottom;
   }
 

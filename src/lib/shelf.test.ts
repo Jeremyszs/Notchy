@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { relativeAge, fileName, extension, wheelRoute, cubicBezier, defaultMode, movedBeyond, DRAG_START_PX } from "./shelf.ts";
+import { relativeAge, fileName, extension, wheelRoute, cubicBezier, defaultMode, movedBeyond, DRAG_START_PX, fileFamily, FAMILY_COLORS } from "./shelf.ts";
 
 test("relative ages use whole minutes, hours and days, with future times held at now", () => {
   for (const [ms, label] of [[0, "now"], [59_999, "now"], [120_000, "2m"], [3_600_000, "1h"], [259_200_000, "3d"]] as const) {
@@ -43,4 +43,15 @@ test("a drag starts only past six pixels, measured as a straight line", () => {
   assert.equal(movedBeyond(0, 0, 6, 0, DRAG_START_PX), false);
   assert.equal(movedBeyond(0, 0, 6, 1, DRAG_START_PX), true);
   assert.equal(movedBeyond(10, 10, 10, -10, DRAG_START_PX), true);
+});
+
+test("file families follow the extension, case blind, and anything else is other", () => {
+  assert.equal(fileFamily("PNG"), "image");
+  assert.equal(fileFamily("pdf"), "pdf");
+  assert.equal(fileFamily("xlsx"), "sheet");
+  assert.equal(fileFamily("svelte"), "code");
+  assert.equal(fileFamily(""), "other");
+  assert.equal(fileFamily(undefined), "other");
+  assert.equal(fileFamily("qqq"), "other");
+  assert.equal(Object.keys(FAMILY_COLORS).length, 10);
 });

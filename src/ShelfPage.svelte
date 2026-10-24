@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
   import { flip } from "svelte/animate";
-  import { rise } from "./lib/motion";
+  import { rise, SMOOTH_MS, smoothEase } from "./lib/motion";
   import { invoke } from "@tauri-apps/api/core";
   import { shelf, shelfDrag, shelfConfirmation, shelfMode, refreshShelf } from "./stores/shelf";
   import { config } from "./stores/config";
@@ -10,6 +10,8 @@
     cubicBezier,
     defaultMode,
     DRAG_START_PX,
+    FAMILY_COLORS,
+    fileFamily,
     movedBeyond,
     relativeAge,
     wheelRoute,
@@ -158,6 +160,17 @@
   function arrive(node: Element) {
     return rise(node, { y: 6, blur: 2, reduced: reduceMotion });
   }
+
+  // A new mode's row slides in from the side its tab is on: Text from the right, Files from the left.
+  function modeIn(_node: Element) {
+    if (reduceMotion) return { duration: 160, css: (t: number) => `opacity: ${t}` };
+    const side = mode === "text" ? 1 : -1;
+    return {
+      duration: SMOOTH_MS,
+      easing: smoothEase,
+      css: (t: number, u: number) => `opacity: ${Math.min(1, t * 1.6)}; transform: translateX(${u * side * 14}px)`,
+    };
+  }
 </script>
 
 <div class="shelf-page">
@@ -209,7 +222,7 @@
         class="layer"
         role="tabpanel"
         aria-labelledby="shelf-tab-{mode}"
-        in:fade={{ duration: 160 }}
+        in:modeIn
         out:fade={{ duration: 120 }}
       >
         <!-- This strip owns wheels and pointer swipes, including at either end. -->
@@ -223,6 +236,7 @@
               class:dragging={dragging === item.id}
               data-id={item.id}
               data-unpinned={!item.pinned}
+              style={item.kind === "file" ? `--fc: ${FAMILY_COLORS[fileFamily(item.ext)]}` : undefined}
               in:arrive
               animate:flip={{ duration: reduceMotion ? 0 : LEAVE_MS, easing: ease }}
             >
@@ -236,8 +250,10 @@
                 onpointercancel={() => (press = null)}
                 onclick={() => activateCard(item)}
               >
-                <span class="kind" aria-hidden="true">
-                  {#if item.kind === "file"}
+                <span class="kind" class:badge={item.kind === "file" && item.ext} aria-hidden="true">
+                  {#if item.kind === "file" && item.ext}
+                    {item.ext}
+                  {:else if item.kind === "file"}
                     <svg viewBox="0 0 16 16"><path d="M4 2h5l3 3v9H4z M9 2v3h3" /></svg>
                   {:else}
                     <svg viewBox="0 0 16 16"><path d="M3 4h10 M3 8h10 M3 12h6" /></svg>
@@ -255,9 +271,15 @@
                 {/if}
                 <span class="foot">
                   <span class="age">{item.missing ? "Missing" : relativeAge(item.atMs, now)}</span>
-                  {#if item.ext}<span class="ext">{item.ext}</span>{/if}
                 </span>
-                <span class="copied" class:visible={copied === item.id} aria-live="polite">{copied === item.id ? "Copied" : ""}</span>
+                <span class="copied" class:visible={copied === item.id} aria-live="polite">
+                  {#if copied === item.id}
+                    <span class="copied-mark">
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" /></svg>
+                      Copied
+                    </span>
+                  {/if}
+                </span>
               </button>
               <div class="actions">
                 <button aria-label={item.pinned ? "Unpin item" : "Pin item"} title={item.pinned ? "Unpin" : "Pin"} onclick={() => action("shelf_pin", { id: item.id, pinned: !item.pinned })}>
@@ -279,7 +301,9 @@
         {#if shown.length === 0}
           <div class="empty" in:fade={{ duration: 180 }}>
             <span class="sheen" aria-hidden="true"></span>
-            <svg class="tray" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11 M7.5 9.5 12 14l4.5-4.5 M4 14v5.5h16V14" /></svg>
+            <span class="tray-disc" aria-hidden="true">
+              <svg class="tray" viewBox="0 0 24 24"><path d="M12 3v11 M7.5 9.5 12 14l4.5-4.5 M4 14v5.5h16V14" /></svg>
+            </span>
             {#if mode === "file"}
               <p class="empty-title">Drop files here</p>
               <p class="empty-sub">{files ? "Files stay where they are" : "Accept dropped files is off, turn it on in Settings"}</p>
@@ -351,6 +375,7 @@
     grid-template-columns: 1fr 1fr;
     border-radius: 999px;
     background: rgb(255 255 255 / 8%);
+    box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 6%);
     transition: opacity 150ms ease;
   }
   .tabs.away { opacity: 0; pointer-events: none; }
@@ -361,7 +386,11 @@
     bottom: 2px;
     width: calc(50% - 2px);
     border-radius: 999px;
-    background: linear-gradient(180deg, var(--accent-a), var(--accent-b));
+    /* Lit from above: a lighter top, a bright inner edge, and a soft glow of its own colour. */
+    background: linear-gradient(180deg, #b0dcff, var(--accent-b));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 45%),
+      0 2px 10px rgb(108 184 255 / 35%);
     transform: translateX(0);
     transition: transform var(--spring-smooth-ms) var(--spring-smooth);
   }
@@ -409,11 +438,32 @@
     height: 84px;
     flex: 0 0 96px;
     border-radius: 12px;
-    background: linear-gradient(rgb(108 184 255 / 10%), rgb(108 184 255 / 10%)), rgb(255 255 255 / 8%);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
+    /* A glass card lit from above, with its kind's colour glowing in from the top-left corner.
+       Text cards take the Shelf blue; files take their family colour (lib/shelf.ts). */
+    background:
+      radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--fc, #6cb8ff) 20%, transparent), transparent 70%),
+      linear-gradient(180deg, rgb(255 255 255 / 11%), rgb(255 255 255 / 6%));
+    box-shadow:
+      inset 0 0 0 0.5px rgb(255 255 255 / 9%),
+      inset 0 1px 0 rgb(255 255 255 / 9%);
+    transition:
+      opacity 150ms ease,
+      transform var(--spring-snappy-ms) var(--spring-snappy);
+  }
+  /* Hover brightens the card by a white layer's opacity, so no colour transitions. */
+  .shelf-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: rgb(255 255 255 / 5%);
+    opacity: 0;
+    pointer-events: none;
     transition: opacity 150ms ease;
   }
-  .shelf-card:hover, .shelf-card:focus-within { transform: translateY(-1px); }
+  .shelf-card:hover::after, .shelf-card:focus-within::after { opacity: 1; }
+  .shelf-card:hover, .shelf-card:focus-within { transform: translateY(-2px); }
+  .shelf-card:has(.card-main:active) { transform: scale(0.97); transition-duration: 150ms, 60ms; }
   .shelf-card.dragging { opacity: 0.45; }
   .shelf-card.missing .card-main { opacity: 0.45; }
   .card-main {
@@ -428,7 +478,27 @@
     -webkit-user-select: none;
   }
   .kind, .pin { position: absolute; top: 8px; width: 12px; height: 12px; }
-  .kind { left: 10px; color: rgb(255 255 255 / 85%); }
+  .kind { left: 10px; color: var(--fc, rgb(255 255 255 / 85%)); }
+  /* A file's extension as a small chip in its family colour. */
+  .kind.badge {
+    width: auto;
+    max-width: 52px;
+    height: 14px;
+    top: 7px;
+    padding: 0 5px;
+    box-sizing: border-box;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--fc) 22%, transparent);
+    color: color-mix(in oklab, var(--fc), #fff 30%);
+    font-size: 9px;
+    line-height: 14px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .kind svg, .pin svg { display: block; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
   .pin { right: 10px; }
   .pin svg { stroke: url(#shelf-aurora-line); }
@@ -437,22 +507,30 @@
   .name { -webkit-line-clamp: 2; line-clamp: 2; font-weight: 600; }
   .foot { position: absolute; left: 10px; right: 10px; bottom: 8px; height: 14px; display: flex; align-items: center; gap: 6px; transition: opacity 150ms ease; }
   .age { color: rgb(255 255 255 / 60%); font-variant-numeric: tabular-nums; }
-  .ext { margin-left: auto; max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgb(255 255 255 / 60%); font-weight: 600; }
 
   .copied {
     position: absolute;
     inset: 0;
     display: grid;
     place-items: center;
-    background: rgb(12 12 12 / 72%);
+    background: rgb(10 16 24 / 88%);
     border-radius: 12px;
     font-weight: 600;
-    color: rgb(255 255 255 / 90%);
+    color: var(--accent-a);
     opacity: 0;
     pointer-events: none;
     transition: opacity 150ms ease;
   }
   .copied.visible { opacity: 1; }
+  /* The mark pops in on the bouncy spring as the flash appears. */
+  .copied-mark {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    animation: pop var(--spring-bouncy-ms) var(--spring-bouncy) both;
+  }
+  .copied-mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  @keyframes pop { from { transform: scale(0.8); } to { transform: none; } }
 
   /* Hover and focus swap the footer for a dark glass pill of actions. Each action is a real button. */
   .actions {
@@ -486,12 +564,23 @@
     justify-content: center;
     gap: 2px;
     border-radius: 14px;
-    border: 1px dashed rgb(255 255 255 / 22%);
+    border: 1px dashed rgb(255 255 255 / 18%);
     overflow: hidden;
     text-align: center;
   }
-  .empty .sheen { opacity: 0.12; animation-duration: 14s; }
-  .tray { position: relative; width: 20px; height: 20px; margin-bottom: 2px; fill: none; stroke: rgb(255 255 255 / 85%); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .empty .sheen { opacity: 0.08; animation-duration: 14s; }
+  .tray-disc {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-bottom: 3px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 30%, rgb(140 203 255 / 30%), rgb(108 184 255 / 10%));
+    box-shadow: inset 0 0 0 0.5px rgb(140 203 255 / 30%);
+  }
+  .tray { width: 16px; height: 16px; fill: none; stroke: var(--accent-a); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
   .empty-title { position: relative; margin: 0; font-size: 12px; line-height: 16px; font-weight: 600; color: rgb(255 255 255 / 90%); }
   .empty-sub { position: relative; margin: 0; font-size: 11px; line-height: 14px; color: rgb(255 255 255 / 60%); }
 
@@ -501,6 +590,7 @@
     inset: 0;
     border-radius: 15px;
     border: 1.5px dashed rgb(140 203 255 / 70%);
+    box-shadow: inset 0 0 24px rgb(108 184 255 / 25%);
     overflow: hidden;
     pointer-events: none;
     animation: pulse 3.5s ease-in-out infinite;
@@ -526,7 +616,8 @@
   @media (prefers-reduced-motion: reduce) {
     .sheen, .drop { animation: none; }
     .pill { transition: none; }
-    .shelf-card, .shelf-card:hover, .shelf-card:focus-within { transform: none; }
+    .shelf-card, .shelf-card:hover, .shelf-card:focus-within, .shelf-card:has(.card-main:active) { transform: none; }
+    .copied-mark { animation: none; }
     .copied, .actions, .foot, .tabs, .tabs button, .clear { transition: none; }
   }
 </style>
